@@ -8,7 +8,7 @@
   <img alt="MetaTrader 5" src="https://img.shields.io/badge/MetaTrader-5-1684d5?style=flat-square">
   <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078d4?style=flat-square">
   <img alt="Version 1.0.0" src="https://img.shields.io/badge/version-1.0.0-2fbd72?style=flat-square">
-  <a href="../../releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/download-latest%20release-2fbd72?style=flat-square"></a>
+  <a href="https://github.com/saroo98/LotCraft/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/download-latest%20release-2fbd72?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@ It does **not** generate signals or place autonomous trades. A new order begins 
 
 ### 1. Download
 
-Open the [latest GitHub Release](../../releases/latest) and download:
+Open the [latest GitHub Release](https://github.com/saroo98/LotCraft/releases/latest) and download:
 
 `LotCraft-1.0.0-Setup.exe`
 

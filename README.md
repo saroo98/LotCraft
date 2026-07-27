@@ -11,8 +11,18 @@
   <a href="https://github.com/saroo98/LotCraft/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/download-latest%20release-2fbd72?style=flat-square"></a>
 </p>
 
+## Full, Compact and Mini modes
+
 <p align="center">
-  <img src="docs/images/lotcraft-interface.png" width="520" alt="LotCraft dark interface showing entry, stop-loss, take-profit, account risk and position size controls">
+  <img src="docs/images/lotcraft-full.png" width="390" alt="LotCraft Full mode with private monetary amounts blurred">
+</p>
+
+<p align="center">
+  <img src="docs/images/lotcraft-compact.png" width="390" alt="LotCraft Compact mode with private monetary amounts blurred">
+</p>
+
+<p align="center">
+  <img src="docs/images/lotcraft-mini.png" width="390" alt="LotCraft Mini mode">
 </p>
 
 LotCraft calculates a tradable position size from your chosen account basis, risk percentage, entry price and stop-loss. It gives you draggable chart levels, Full, Compact and Mini layouts, dark and light themes, pending or market entry, confirmation control, and an explicit final trade button.

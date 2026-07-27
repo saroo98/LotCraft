@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">Install LotCraft in three steps</title>
+  <desc id="desc">Download the setup file, run the one-file installer, then attach LotCraft in MetaTrader 5.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07111c"/>
+      <stop offset="1" stop-color="#101d2b"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#35c878"/>
+      <stop offset="1" stop-color="#15965a"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="360" rx="28" fill="url(#background)"/>
+  <text x="60" y="62" fill="#f5f7fa" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="700">Install LotCraft in about one minute</text>
+  <text x="60" y="94" fill="#93a4b8" font-family="Segoe UI, Arial, sans-serif" font-size="17">One download. One installer. No manual folder copying.</text>
+
+  <g transform="translate(60 126)" filter="url(#shadow)">
+    <rect width="320" height="174" rx="18" fill="#132232" stroke="#2b4055"/>
+    <circle cx="44" cy="42" r="22" fill="url(#green)"/>
+    <text x="44" y="50" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">1</text>
+    <path d="M247 34v49m-18-18 18 18 18-18M216 96h62" fill="none" stroke="#45d489" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="26" y="126" fill="#f5f7fa" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="700">Download</text>
+    <text x="26" y="153" fill="#a8b6c6" font-family="Segoe UI, Arial, sans-serif" font-size="16">Get the Setup.exe from Releases.</text>
+  </g>
+
+  <path d="M401 213h66" stroke="#38516a" stroke-width="4" stroke-linecap="round"/>
+  <path d="m455 202 14 11-14 11" fill="none" stroke="#45d489" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g transform="translate(475 126)" filter="url(#shadow)">
+    <rect width="320" height="174" rx="18" fill="#132232" stroke="#2b4055"/>
+    <circle cx="44" cy="42" r="22" fill="url(#green)"/>
+    <text x="44" y="50" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">2</text>
+    <rect x="218" y="31" width="64" height="58" rx="8" fill="none" stroke="#45d489" stroke-width="5"/>
+    <path d="M232 50h36M232 64h25" stroke="#45d489" stroke-width="4" stroke-linecap="round"/>
+    <text x="26" y="126" fill="#f5f7fa" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="700">Install</text>
+    <text x="26" y="153" fill="#a8b6c6" font-family="Segoe UI, Arial, sans-serif" font-size="16">Open it and approve your MT5 folder.</text>
+  </g>
+
+  <path d="M816 213h66" stroke="#38516a" stroke-width="4" stroke-linecap="round"/>
+  <path d="m870 202 14 11-14 11" fill="none" stroke="#45d489" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g transform="translate(890 126)" filter="url(#shadow)">
+    <rect width="250" height="174" rx="18" fill="#132232" stroke="#2b4055"/>
+    <circle cx="44" cy="42" r="22" fill="url(#green)"/>
+    <text x="44" y="50" text-anchor="middle" fill="#fff" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">3</text>
+    <path d="M177 35h43v43h-43zM187 46h23v21h-23z" fill="none" stroke="#45d489" stroke-width="5"/>
+    <text x="26" y="126" fill="#f5f7fa" font-family="Segoe UI, Arial, sans-serif" font-size="23" font-weight="700">Attach</text>
+    <text x="26" y="153" fill="#a8b6c6" font-family="Segoe UI, Arial, sans-serif" font-size="16">Open LotCraft from Navigator.</text>
+  </g>
+</svg>

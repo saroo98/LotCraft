@@ -1,0 +1,37 @@
+# Local build and release outputs
+/build/
+/release/
+/artifacts/
+/SHA256SUMS.txt
+/docs/TEST_EVIDENCE.md
+/compact-mode-preview*.png
+
+# Compiled MetaTrader and installer payloads
+*.ex5
+/installer/cmd/setup/LotCraft.ex5
+*.exe
+*.log
+
+# Test and language caches
+/.pytest_cache/
+**/__pycache__/
+*.py[cod]
+
+# Local editor and OS state
+.idea/
+.vscode/
+.vs/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+credentials.*
+secrets.*

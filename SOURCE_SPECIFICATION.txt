@@ -1,0 +1,569 @@
+Build Prompt: LotCraft v1.0.0 for MetaTrader 5
+
+You are to design and implement a new MetaTrader 5 Expert Advisor from zero. Its product name, source name, compiled name, chart object prefix, displayed title, log prefix, installer name, and version metadata must all identify it as:
+
+- Product: `LotCraft`
+- Initial version: `1.0.0`
+- Source: `LotCraft.mq5`
+- Compiled program: `LotCraft.ex5`
+- Program type: MetaTrader 5 Expert Advisor
+
+Do not modify, copy over, depend on, or install as the old Position Sizer. This is a clean implementation with its own unique chart-object names, persistent-state keys, files, and installation folder so it can be recognized and tested independently.
+
+## Authority and design freedom
+
+This document defines what the product must contain and how it must behave. It deliberately does not define its appearance, layout, dimensions, colors, typography, spacing, icons, visual hierarchy, animation style, or other visual-design choices.
+
+You have full responsibility for the UI and UX design. Make those decisions to the highest professional standard for a native-feeling MT5 trading tool. A visually different result is acceptable.
+
+Do not ask for a screenshot or attempt to reproduce an existing appearance. Do not add features, buttons, fields, tabs, menus, trading modes, or visible controls that are not explicitly required here. If an internal technical mechanism is necessary for correctness, safety, accessibility, or performance, it may be added internally without becoming another user-facing feature.
+
+## Product purpose
+
+LotCraft is a discretionary position-sizing and order-entry assistant. It must let the trader define an entry, stop-loss, optional take-profit, account-money basis, risk, direction, order type, and commission. It must calculate the appropriate tradable volume using the current symbol's real broker specifications and, only after an explicit user action, place the corresponding MT5 order.
+
+It is not a signal generator, automated strategy, trade copier, portfolio manager, or autonomous trading robot. It must never decide when to trade and must never place, modify, or close a trade without a deliberate action through one of the controls specified below.
+
+## Exact user-facing control inventory
+
+The full interface must contain exactly the following interactive controls. Do not add or remove user-facing controls.
+
+1. `Manual`
+   - Opens MT5's native New Order dialog for the current chart symbol.
+   - It must not place a trade by itself.
+
+2. `Mini`
+   - Toggles between the full interface and a compact/minimized state.
+   - The compact state must preserve the configured trade and calculation state.
+   - The same control must allow returning to the full state. Its label may reflect the current action if that is the chosen UX.
+
+3. Close control
+   - Removes LotCraft from the chart cleanly.
+   - It must not close or alter any position or pending order.
+
+4. Trade-direction control
+   - Selects `Long` or `Short`.
+   - Changing direction must produce a logically valid entry/SL/TP configuration or clearly prevent trading until the configuration is valid.
+
+5. Editable `Entry` value
+   - Defines the proposed entry price.
+   - It is editable by keyboard.
+
+6. Entry `+` and `-`
+   - Adjust the proposed entry by valid symbol tick-size increments.
+   - A single click performs one deterministic step.
+   - Holding the control must auto-repeat and accelerate progressively, while remaining controllable and stopping immediately on release or pointer loss.
+
+7. Entry `C`
+   - Copies the normalized entry price to the operating-system clipboard.
+
+8. Editable `Stop-loss` value
+   - Defines the proposed stop-loss price.
+   - It is editable by keyboard.
+
+9. Stop-loss `+` and `-`
+   - Adjust the stop-loss by valid symbol tick-size increments.
+   - They have the same responsive, accelerating hold behavior as the entry controls.
+
+10. Stop-loss `C`
+    - Copies the normalized stop-loss price to the operating-system clipboard.
+
+11. Editable `Take-profit` value
+    - Defines one optional take-profit price.
+    - A zero or explicitly empty value disables the take-profit if that can be represented safely.
+    - It is editable by keyboard.
+
+12. Take-profit `+` and `-`
+    - Adjust the take-profit by valid symbol tick-size increments.
+    - They have the same responsive, accelerating hold behavior as the other price controls.
+
+13. Take-profit `C`
+    - Copies the normalized take-profit price to the operating-system clipboard.
+
+14. `Order type`
+    - Selects only between:
+      - `Instant`, meaning a market order using the current executable market price.
+      - `Pending`, meaning a pending order at the configured entry price.
+    - The actual pending-order subtype must be inferred correctly from direction and the entry price relative to the market.
+
+15. `Show lines` / `Hide lines`
+    - Shows or hides LotCraft's own entry, stop-loss, and take-profit chart lines and their drag handles.
+    - Hiding lines must not discard their configured values.
+
+16. `Commission/lot` type
+    - Selects the supported commission representation used by the calculation.
+    - At minimum, support commission as account-currency money per lot for one side or round trip, with the interpretation explicit and mathematically consistent.
+    - If percentage commission is supported, it must be selected through this same control, not through an additional control.
+
+17. Editable `Commission/lot` value
+    - Defines the commission assumption used in requested and actual risk calculations.
+
+18. Account-money basis selector
+    - Selects exactly one of:
+      - `Equity`: use live `ACCOUNT_EQUITY`.
+      - `Balance`: use live `ACCOUNT_BALANCE`.
+      - `Manual`: use a user-entered account-money amount.
+    - Switching modes must immediately recalculate all dependent outputs.
+
+19. Account-money value
+    - Shows the current monetary basis used for sizing.
+    - In `Equity` mode, it follows current account equity and is read-only.
+    - In `Balance` mode, it follows current account balance and is read-only.
+    - In `Manual` mode, it is keyboard-editable and accepts a positive finite monetary value.
+    - The manual value must remain stored when temporarily switching to Equity or Balance and must be restored when Manual is selected again.
+
+20. Editable requested `Risk, %`
+    - Defines risk as a percentage of the selected account-money basis.
+    - Editing it makes percentage risk the active risk-input authority and updates requested risk money.
+
+21. Editable requested `Risk, money`
+    - Defines risk directly in account currency.
+    - Editing it makes money risk the active risk-input authority and updates requested risk percentage.
+    - The label must use the live account-currency code rather than a hard-coded currency.
+
+22. Read-only actual `Risk, %`
+    - Shows the risk percentage produced by the broker-valid rounded volume.
+
+23. Read-only actual `Risk, money`
+    - Shows the money risk produced by the broker-valid rounded volume.
+
+24. Read-only `Position size`
+    - Shows the calculated broker-valid volume in lots.
+
+25. Position-size `C`
+    - Copies the normalized calculated lot size to the operating-system clipboard.
+
+26. `Move SLs to line`
+    - Moves the stop losses of eligible existing trades to the currently configured LotCraft stop-loss line.
+    - This is an explicit trade-modification action and must be protected by all validation and confirmation requirements described below.
+    - Its scope and eligibility rules must be unambiguous, conservative, and limited to the current symbol unless the existing visible control itself communicates another scope. Do not add scope controls.
+
+27. `Ask for confirmation`
+    - A persistent boolean option.
+    - When enabled, every action that places an order or modifies existing stop losses must show a complete confirmation before sending any trade request.
+    - Clicking it once must toggle it once. It must never toggle itself back because of refresh, redraw, timer, focus, or mouse events.
+
+28. Main trade action
+    - Places the currently configured market or pending order.
+    - Its text must communicate direction and calculated volume before execution.
+    - It is the only LotCraft control that creates a new order.
+
+There must be no additional visible buttons, input fields, checkboxes, tabs, menus, shortcuts presented as controls, extra take-profit controls, trailing-stop controls, break-even controls, portfolio controls, margin controls, leverage controls, swap controls, magic-number controls, or strategy features.
+
+## Chart levels and drag handles
+
+LotCraft owns one entry level, one stop-loss level, and one optional take-profit level.
+
+Each visible level must have:
+
+- A chart line representing the price.
+- One associated drag handle used to move that level vertically.
+
+These invariants are mandatory:
+
+1. LotCraft's chart lines are permanently non-selectable and non-draggable.
+2. Clicking, double-clicking, or dragging any part of a line must never change its price.
+3. The drag handle is the only chart-based way to move its corresponding level.
+4. The entire visible area of a handle must respond to a single press and drag. It must never require double-clicking, selecting the object first, or grabbing an MT5 selection anchor.
+5. While the handle is being dragged, its line must move continuously with it on every relevant mouse-move event. The handle and line must never visually or logically separate and then catch up only after release.
+6. A handle controls exactly one LotCraft level and must never select or move a broker position, pending order, broker SL/TP level, or unrelated chart object.
+7. Handles are shown only when their corresponding LotCraft line is enabled, visible in the chart's current price viewport, and the global line visibility is on.
+8. If a corresponding line is outside the current visible price range, its handle must not remain floating elsewhere on the chart.
+9. Handles must remain correctly attached after chart resize, zoom, scroll, symbol or timeframe changes, scale changes, panel movement, line visibility changes, and price-scale updates.
+10. Line-lock rules must be centralized and reasserted after creation, restoration, refresh, chart changes, visibility changes, template changes, and drag completion.
+11. Direct numeric editing and `+`/`-` adjustment must move the associated line and handle immediately.
+12. Handle dragging must update the associated numeric field and all calculations immediately.
+
+Do not use ordinary selectable MT5 line objects as an accidental second dragging path. Do not rely on native object-selection mode. Implement explicit pointer hit-testing, capture, movement, and release behavior.
+
+## Editing and focus behavior
+
+All editable numeric fields must behave like dependable single-click editors.
+
+- One click focuses the field and makes it ready for typing.
+- A double-click must not be required.
+- Typing must affect the field selected by the first click.
+- Valid input must update the model and all dependent calculations immediately on each keystroke, without requiring a click on another field.
+- The user's raw text must remain visible during editing. For example, entering `2` may remain displayed as `2` while calculations already use the numeric value 2.
+- Temporarily incomplete states such as empty text, a decimal separator, or a leading minus sign may exist while editing, but must never be applied as a valid calculation.
+- `Enter` validates, commits, normalizes, and keeps the resulting system state.
+- `Escape` restores both the original field text and the original calculated state.
+- Clicking another control, another field, a blank part of the interface, or outside the interface commits and normalizes valid text.
+- Invalid committed input must not corrupt state, produce NaN/infinity, silently become an unsafe value, or trigger a trade.
+- Backspace, Delete, decimal input, selection replacement, and normal keyboard navigation must work consistently.
+- Numeric parsing must be locale-aware or deliberately use and clearly enforce one decimal convention.
+- Read-only output fields must never accidentally become editable.
+- Focus must not create duplicate native edit rectangles, orphan controls, tiny selection anchors, stale text, or other residual chart objects.
+
+## Pointer ownership and interaction isolation
+
+The interface must fully own pointer events occurring within its bounds.
+
+- A click, double-click, press, drag, wheel event, or release over the interface must not reach chart objects or broker trade levels underneath it.
+- Dragging the interface must move only the interface.
+- Pointer capture must continue until release, including if the pointer leaves the interface while dragging.
+- The interface must remain the interaction target throughout its drag.
+- Chart scrolling and native trade-level dragging must be temporarily suppressed whenever required to prevent input leakage, then restored exactly to the user's prior settings on release, pointer exit, minimization, failure, or EA removal.
+- Hit-testing order must prioritize the interface, then LotCraft handles outside it, and only then allow the chart to process unrelated input.
+- No interface mouse event may fall through to legacy line or broker-level movement logic.
+- Double-clicking the interface must not select the interface object or show an MT5 object-selection border.
+- The interface and all noninteractive backing objects must remain non-selectable and non-selected.
+- Normal chart functionality outside the interface and outside the handles must remain intact.
+
+## Position-size calculation
+
+Calculations must use live MT5 symbol and account data. Do not hard-code pip values, contract sizes, decimal digits, currencies, or lot constraints.
+
+Use, validate, and correctly combine the applicable MT5 properties, including:
+
+- Bid and ask.
+- Symbol digits, point, tick size, tick value for profit and loss, contract size, and calculation mode.
+- Minimum volume, maximum volume, volume step, and volume limit.
+- Stops level and freeze level.
+- Account currency, balance, equity, margin mode, and selected account-money basis.
+- Commission assumption.
+
+The risk model must:
+
+1. Determine the correct executable entry price for the selected direction and order type.
+2. Reject a zero or invalid stop distance.
+3. Calculate the one-lot loss from entry to stop robustly. Prefer `OrderCalcProfit()` where appropriate so non-Forex instruments and account-currency conversion are handled correctly.
+4. Include commission consistently according to the declared commission interpretation.
+5. Calculate raw requested volume from requested money risk.
+6. Normalize volume downward to the broker's volume step so actual risk does not exceed requested risk merely because of rounding.
+7. Clamp or reject against minimum volume, maximum volume, and aggregate volume limit using an explicit, safe policy.
+8. Recompute actual money and percentage risk from the final normalized volume.
+9. Respect different symbol classes, including Forex, metals, indices, energies, exchange instruments, and symbols whose tick value or profit currency differs from the account currency.
+10. Avoid division by zero, stale quotes, invalid tick values, invalid price distances, and floating-point step errors.
+
+Risk percentage and risk money are two views of the same requested risk:
+
+- Editing percentage derives requested money from the selected account-money basis.
+- Editing money derives percentage from the selected account-money basis.
+- The most recently edited risk field remains authoritative as live equity or balance changes.
+- In Equity or Balance mode, a live account-value change must update the dependent risk view and sizing correctly without overwriting the authoritative value.
+- In Manual mode, calculations use only the validated manual account-money value.
+
+Every change to direction, order type, entry, stop-loss, take-profit, commission, account mode, manual account amount, risk percentage, risk money, quote, or relevant symbol/account property must cause a coherent recalculation.
+
+## Direction and price validity
+
+For a long setup:
+
+- Stop-loss must be below the effective entry.
+- An enabled take-profit must be above the effective entry.
+
+For a short setup:
+
+- Stop-loss must be above the effective entry.
+- An enabled take-profit must be below the effective entry.
+
+For pending orders:
+
+- Infer Buy Limit, Buy Stop, Sell Limit, or Sell Stop from direction and entry relative to the current market.
+- Respect broker stop and freeze constraints.
+- Reject ambiguous, crossed, stale, or invalid prices.
+
+For instant orders:
+
+- Use the current executable side of the market.
+- Keep any displayed entry representation synchronized with the price actually used for sizing.
+- Revalidate immediately before sending because price and risk can change between display and execution.
+
+Never silently reverse direction, move a protective level, or place a different order type merely to make an invalid setup executable.
+
+## Trading behavior and safety
+
+Before any order placement:
+
+- Re-read the latest quote and relevant symbol properties.
+- Recalculate volume and actual risk.
+- Validate terminal connection, trade permissions, symbol trade mode, market/session availability, volume constraints, prices, stops, and filling/time policies.
+- Use an appropriate `MqlTradeRequest` or standard-library trade mechanism with explicit request and result handling.
+- Select a broker-supported filling policy and expiration policy.
+- Prevent duplicate submissions from double-clicks, key repeat, delayed events, or a still-pending request.
+- Disable or guard the trade action while a request is in flight.
+- Report the actual server retcode and a useful explanation on failure.
+- Never claim success solely because the local send function returned.
+
+When confirmation is enabled, the confirmation must state at least:
+
+- Symbol.
+- Long/short direction.
+- Market or exact pending-order subtype.
+- Entry or current executable price.
+- Stop-loss.
+- Take-profit state and price if enabled.
+- Volume.
+- Requested and actual money risk.
+- Requested and actual percentage risk.
+- Selected account-money mode and value.
+- Commission assumption.
+
+Cancellation must make no trade request.
+
+The `Move SLs to line` action must:
+
+- Operate only after an explicit click and, when enabled, confirmation.
+- Revalidate the target stop price independently for every eligible position/order.
+- Never worsen or remove a stop silently.
+- Never modify an ineligible symbol, direction, or trade.
+- Handle hedging and netting accounts correctly.
+- Handle partial success explicitly and report each failure without pretending the entire batch succeeded.
+- Avoid changing take-profits, entries, volumes, or unrelated order properties.
+
+## State and lifecycle
+
+LotCraft must behave correctly through the full MT5 lifecycle:
+
+- Attach to a chart.
+- Remove from a chart.
+- Recompile and reload.
+- Change timeframe.
+- Change symbol.
+- Change chart template.
+- Resize, maximize, minimize, dock, or move the terminal.
+- Toggle full/mini mode repeatedly.
+- Show/hide lines repeatedly.
+- Lose and regain quotes or connection.
+- Switch trading permissions.
+
+Persist only appropriate configuration and user state, including:
+
+- Account-money mode.
+- Stored manual account-money value.
+- Risk authority and requested value.
+- Commission type/value.
+- Ask-for-confirmation state.
+- Full/mini state.
+- Line visibility.
+
+Do not persist stale symbol prices in a way that creates an unsafe setup on another symbol. Symbol-specific state must be namespaced by account, server, symbol, chart, or another safe ownership key as appropriate.
+
+On deinitialization:
+
+- Delete only objects owned by this LotCraft instance.
+- Stop timers and release resources.
+- Restore every chart property temporarily changed by the EA.
+- Remove no user object and no broker object.
+- Leave no bitmap, canvas, edit overlay, selection marker, handle, line, event capture, global flag, or stale object behind.
+
+Multiple LotCraft instances on different charts must not collide.
+
+## Responsiveness and rendering quality
+
+Interaction must be smooth under normal MT5 use:
+
+- Panel dragging and handle dragging should visually follow the pointer without visible lag, catch-up, blinking, or repeated disappearance.
+- Do not rebuild the entire UI or recreate chart objects on every mouse move or tick.
+- Repaint only dirty regions/state and coalesce redundant redraw requests.
+- Separate quote-driven calculation updates from pointer-driven rendering.
+- Avoid blocking work inside `OnChartEvent`, `OnTick`, and timers.
+- Throttle expensive work without throttling direct manipulation.
+- Use stable object ownership and reuse.
+- Prevent reentrant event loops caused by programmatic control updates.
+- Preserve active edit focus and raw text during background quote refreshes.
+- Do not poll at an unnecessarily high rate when nothing changed.
+
+Define and instrument reasonable internal performance budgets for pointer handling, calculation, rendering, and trade validation. Debug instrumentation must not become a visible product feature and must be disabled or lightweight in release builds.
+
+## Error handling and observability
+
+- All recoverable errors must leave the EA in a coherent, nontrading state.
+- User-facing errors must explain what failed and what the user can do.
+- Technical logs must use the prefix `LotCraft`.
+- Never log secrets.
+- Do not flood logs on every tick with the same condition.
+- Treat allocation failure, object-creation failure, invalid handles, invalid symbol properties, failed property restoration, and trade-server failures explicitly.
+- No array-out-of-range, zero-divide, invalid-pointer, leaked-object, access-violation, or undeleted-object messages are acceptable.
+
+## Architecture and code quality
+
+Produce maintainable, reviewable MQL5 rather than one monolithic event handler.
+
+Use clear internal boundaries for:
+
+- Domain state and invariants.
+- Symbol/account data acquisition.
+- Risk and volume calculation.
+- Price normalization and validation.
+- Trade request preparation and execution.
+- Interface model.
+- Rendering.
+- Keyboard editing.
+- Pointer hit-testing and capture.
+- Chart lines and handles.
+- Persistence.
+- Logging and diagnostics.
+
+Requirements:
+
+- One authoritative model for all values.
+- No separate unsynchronized canvas, control, and chart-line truth.
+- Explicit state machines for editing and dragging.
+- Centralized line-lock invariant.
+- Centralized numeric normalization.
+- No magic object names shared with the old product.
+- No dependence on undocumented memory manipulation or unsafe Windows hooks.
+- Native Windows integration, if needed for the clipboard or order dialog, must be isolated, minimal, architecture-correct, and fail safely.
+- Every resource must have clear ownership and deterministic cleanup.
+- Comments must explain reasons and invariants, not restate syntax.
+- Release compilation must have zero errors and zero warnings.
+
+## Required deliverables
+
+Return a complete, buildable project, not pseudocode or fragments:
+
+1. All `.mq5` and `.mqh` source files.
+2. Any non-code resources strictly required at runtime.
+3. A concise architecture document.
+4. A build and installation document.
+5. A requirements-to-implementation traceability table.
+6. A test plan and test evidence.
+7. A known-limitations document containing only genuine, verified limitations.
+8. A clean compiled `LotCraft.ex5`.
+9. A Windows installer named unambiguously for `LotCraft 1.0.0`.
+10. SHA-256 hashes for the canonical EX5, staged installer EX5, installed EX5, and installer.
+
+Do not ship source files inside the end-user installer unless explicitly requested later.
+
+The installer must:
+
+- Identify itself as `LotCraft 1.0.0`.
+- Discover or allow selection of a real MT5 terminal data directory.
+- Install to a dedicated path such as `MQL5\Experts\LotCraft\LotCraft.ex5`.
+- Never overwrite the old Position Sizer or any unrelated EA.
+- Detect junctions, symbolic links, mount points, and already-resolved development paths safely.
+- Permit installation through an intended, verified MT5 link only when the final resolved destination is explicitly validated and remains within the selected terminal's `MQL5\Experts` ownership policy.
+- Report the exact final destination.
+- Support clean upgrade and uninstall of LotCraft-owned files only.
+
+## Mandatory test matrix
+
+Create automated tests where practical and perform manual MT5 demo-chart validation. Do not place a live trade during development or verification.
+
+### Calculation tests
+
+- Long and short.
+- Instant and every inferred pending subtype.
+- Risk entered as percentage and as money.
+- Equity, Balance, and Manual account-money modes.
+- Live equity/balance changes while each risk authority is active.
+- Manual amount persistence across mode switches.
+- Commission zero and nonzero.
+- Different digits, tick sizes, tick values, contract sizes, and volume steps.
+- Minimum/maximum volume and aggregate volume limit.
+- Requested volume below minimum.
+- Requested volume above maximum.
+- Stop distance zero, one tick, very large, invalid, crossed, or inside broker limits.
+- Forex, metal, index, energy, and exchange-style symbol fixtures.
+- Account currency different from symbol profit currency.
+- Missing or invalid symbol data.
+- Rounding proves actual risk does not exceed requested risk because of volume rounding.
+
+### Editing tests
+
+- Single-click focus for every editable field.
+- Immediate recalculation for every valid keystroke.
+- Typing `1`, replacing it with `2`, and observing risk money and position size update on that same edit.
+- Decimal point, decimal comma if supported, Backspace, Delete, selection replacement, Enter, Escape, empty input, incomplete input, invalid characters, very large input, NaN-like text, and infinity-like text.
+- Commit by clicking another field, another control, blank interface space, and outside the interface.
+- Background quote updates do not steal focus or overwrite raw edit text.
+- No duplicate edit rectangles, selection anchors, or residual controls.
+
+### Chart-interaction tests
+
+- Direct click, double-click, and drag on every LotCraft line never changes its price.
+- The full body of each handle starts dragging on one press.
+- Each handle and its line move continuously together.
+- A handle never moves a different LotCraft line.
+- Handles disappear when their lines are hidden or outside the price viewport.
+- Handles remain attached across resize, scale, zoom, scroll, symbol, and timeframe changes.
+- An underlying broker entry, SL, TP, order line, or chart object does not move when the pointer action begins over the interface or a LotCraft handle.
+- Normal broker-line interaction outside LotCraft remains available.
+- Interface dragging remains smooth and does not leak input.
+- Double-clicking never exposes an MT5 object-selection border.
+
+### Control and lifecycle tests
+
+- Every listed control performs exactly one intended action.
+- No unlisted control exists.
+- Ask-for-confirmation remains stable through refresh and redraw.
+- `+`/`-` single step, hold repeat, acceleration, and immediate stop on release.
+- Show/hide and full/mini toggled at least 20 times.
+- Attach/remove repeated at least 20 times.
+- Timeframe and symbol switching.
+- Multiple instances on different charts.
+- Terminal restart and state restoration.
+- EA removal restores changed chart settings and leaves no owned objects.
+
+### Trading safety tests
+
+- Use a demo account or mocked request boundary only.
+- Valid market order.
+- All valid pending subtypes.
+- Confirmation approve and cancel.
+- Double-click/submission debounce.
+- Requote, stale price, rejected stops, invalid volume, unsupported filling, market closed, no connection, trading disabled, and server rejection.
+- `Move SLs to line` with zero, one, and multiple eligible trades.
+- Hedging and netting behavior.
+- Partial modification failure.
+- No action touches another symbol or unrelated order.
+
+### Performance and runtime tests
+
+- Rapid interface dragging.
+- Rapid handle dragging.
+- Dragging while ticks arrive.
+- Holding each stepper through maximum acceleration.
+- Editing while ticks arrive.
+- Long-duration idle run.
+- Runtime logs checked for initialization failure, array errors, zero division, access violations, resource leaks, object leaks, trade-request duplication, and repeated-error floods.
+
+## Acceptance criteria
+
+The implementation is complete only when all of the following are true:
+
+- The product is consistently named `LotCraft 1.0.0`.
+- It builds in MetaEditor with zero errors and zero warnings.
+- It contains exactly the controls listed in this document and no others.
+- Equity, Balance, and Manual account-money modes work as specified.
+- All editable values respond on one click and recalculate immediately while typing.
+- LotCraft lines cannot be moved directly under any tested condition.
+- Each full drag handle is movable with one press and remains continuously attached to its line.
+- Pointer activity over the interface or handles never moves an underlying broker trade level.
+- The interface does not show native object-selection borders or artifacts.
+- Repeated interaction does not produce duplicate controls, stale objects, flicker, or visible catch-up.
+- Risk and volume calculations are correct for broker constraints and diverse symbol types.
+- Trading actions are explicit, revalidated, debounced, and accurately reported.
+- Cleanup restores the user's chart and removes only LotCraft-owned resources.
+- Automated tests pass.
+- Manual demo verification passes.
+- Runtime logs contain no critical or leak-related errors.
+- Canonical, staged, and installed EX5 copies have identical SHA-256 hashes.
+- The installer installs beside, and never over, any old Position Sizer installation.
+
+## Response protocol
+
+Before writing code:
+
+1. Restate the requirements as a traceability checklist.
+2. Identify any true ambiguity that affects trading safety or mathematical correctness.
+3. Resolve non-safety implementation details using your own expert judgment without asking about appearance.
+4. Do not propose extra features.
+
+During implementation:
+
+1. Work in coherent, reviewable stages.
+2. Compile and test after each risky subsystem.
+3. Treat every acceptance criterion as mandatory.
+4. Do not report a behavior as fixed without test evidence.
+
+At completion:
+
+1. Provide the full project.
+2. Show the exact compile result.
+3. Show automated and manual test results separately.
+4. Disclose anything not directly verified.
+5. Provide exact artifact paths and SHA-256 hashes.
+6. State clearly that no live trade was placed during verification.

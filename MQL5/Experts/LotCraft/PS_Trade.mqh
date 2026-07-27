@@ -3,12 +3,6 @@
 
 #include "PS_UI.mqh"
 
-ulong PS_TradeMagic(const PSMarketSnapshot &market)
-  {
-   string seed=PS_PRODUCT_NAME+"|"+market.account_server+"|"+market.symbol+"|"+IntegerToString(ChartID());
-   return((ulong)100000000+(ulong)PS_HashString32(seed));
-  }
-
 bool PS_TradeRetcodeAccepted(const uint retcode)
   {
    return(retcode==TRADE_RETCODE_DONE || retcode==TRADE_RETCODE_PLACED || retcode==TRADE_RETCODE_DONE_PARTIAL);
@@ -169,7 +163,7 @@ bool PS_TradeBuildSnapshot(const PSModel &model,const PSMarketSnapshot &market,c
 
    MqlTradeRequest request={};
    request.action=(model.order_mode==PS_ORDER_INSTANT ? TRADE_ACTION_DEAL : TRADE_ACTION_PENDING);
-   request.magic=PS_TradeMagic(market);
+   request.magic=0;
    request.symbol=market.symbol;
    request.volume=calc.volume;
    request.type=calc.resolved_order_type;

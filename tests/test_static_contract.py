@@ -777,3 +777,9 @@ def test_native_pointer_fallback_preserves_capture_and_restores_on_pointer_exit(
     assert "PS_FlushCapturedMove();" in timer
     assert "g_ui.guard_saved && !g_editor.active && pointer_known" in timer
     assert "PS_UpdateInteractionGuard(pointer_x,pointer_y)" in timer
+
+
+def test_all_new_trade_requests_use_zero_magic_number():
+    trade = (SRC / "PS_Trade.mqh").read_text(encoding="utf-8")
+    assert "request.magic=0;" in trade
+    assert "PS_TradeMagic" not in trade

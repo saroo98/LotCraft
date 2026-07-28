@@ -677,8 +677,12 @@ def test_confirmation_toggle_has_no_refresh_side_effect_assignment():
 def test_trade_confirmation_is_single_stage_and_refreshed_before_send():
     trade = (SRC / "PS_Trade.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
-    for field in ["Symbol:", "Direction:", "Order:", "Entry:", "Stop-loss:", "Take-profit:", "Volume:", "Requested risk:", "Actual risk:", "Account basis:", "Commission:"]:
-        assert field in trade
+    confirmation = re.search(r"string PS_TradeConfirmationText.*?\n  \}", trade, re.S).group(0)
+    assert "REQUESTED RISK" in confirmation
+    assert "ACTUAL RISK" in confirmation
+    assert "Send this trade request?" in confirmation
+    for field in ["Symbol:", "Direction:", "Order:", "Entry:", "Stop-loss:", "Take-profit:", "Volume:", "Account basis:", "Commission:"]:
+        assert field not in confirmation
     assert main.count("PS_PRODUCT_NAME+\" \"+PS_VERSION_TEXT+\" confirmation\"") == 1
     assert "updated confirmation" not in main
     assert "PS_CopyTradeSnapshot(confirmed,refreshed);" in main
@@ -687,8 +691,9 @@ def test_trade_confirmation_is_single_stage_and_refreshed_before_send():
 def test_sl_confirmations_are_complete_and_revalidated():
     trade = (SRC / "PS_Trade.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
-    for field in ["Symbol:", "Direction:", "Order:", "Entry:", "Stop-loss:", "Take-profit:", "Volume:", "Requested risk:", "Actual risk:", "Account basis:", "Commission:"]:
-        assert field in trade
+    sl_confirmation = re.search(r"string PS_TradeSlConfirmationText.*?\n  \}", trade, re.S).group(0)
+    for field in ["Symbol:", "Direction scope:", "Target stop-loss:", "Eligible positions/pending orders:"]:
+        assert field in sl_confirmation
     assert "PS_TradeSlTargetSetsEqual" in main
 
 

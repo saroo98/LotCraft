@@ -270,25 +270,11 @@ bool PS_TradeSnapshotsMateriallyEqual(const PSTradeSnapshot &a,const PSTradeSnap
 
 string PS_TradeConfirmationText(const PSTradeSnapshot &snapshot,const PSMarketSnapshot &market)
   {
-   string tp=(snapshot.tp_enabled ? PS_PriceText(snapshot.take_profit,market) : "Disabled");
-   string commission=(snapshot.commission_mode==PS_COMMISSION_ONE_SIDE
-                      ? StringFormat("%s %s per lot, one side (counted twice)",PS_MoneyText(snapshot.commission_per_lot,market),market.account_currency)
-                      : StringFormat("%s %s per lot, round trip",PS_MoneyText(snapshot.commission_per_lot,market),market.account_currency));
-   return(StringFormat("Symbol: %s\nDirection: %s\nOrder: %s\nEntry: %s\nStop-loss: %s\nTake-profit: %s\nVolume: %s lots\n\nRequested risk: %s %s (%s%%)\nActual risk: %s %s (%s%%)\nAccount basis: %s, %s %s\nCommission: %s\n\nSend this trade request?",
-                       snapshot.symbol,
-                       PS_DirectionText(snapshot.direction),
-                       snapshot.order_text,
-                       PS_PriceText(snapshot.entry,market),
-                       PS_PriceText(snapshot.stop_loss,market),
-                       tp,
-                       PS_VolumeText(snapshot.volume,market),
+   return(StringFormat("REQUESTED RISK\n%s %s (%s%%)\n\nACTUAL RISK\n%s %s (%s%%)\n\nSend this trade request?",
                        PS_MoneyText(snapshot.requested_money,market),market.account_currency,
                        PS_PercentText(snapshot.requested_percent),
                        PS_MoneyText(snapshot.actual_money,market),market.account_currency,
-                       PS_PercentText(snapshot.actual_percent),
-                       PS_AccountModeText(snapshot.account_mode),
-                       PS_MoneyText(snapshot.account_basis,market),market.account_currency,
-                       commission));
+                       PS_PercentText(snapshot.actual_percent)));
   }
 
 bool PS_TradeSlNeedsChange(const double old_sl,const double target,const double tick_size)

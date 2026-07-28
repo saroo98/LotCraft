@@ -29,6 +29,7 @@ def test_installer_payload_is_exactly_named_and_source_is_not_owned():
     assert "strings.EqualFold(filepath.Base(payloadPath), ex5Name)" in SOURCE
     owned = re.search(r"OwnedFiles:\s*\[\]string\{([^}]*)\}", SOURCE).group(1)
     assert "ex5Name" in owned
+    assert "updaterName" in owned
     assert "uninstallName" in owned
     assert "manifestName" in owned
     for forbidden in [".mq5", ".mqh", "Pasted text", "Position Sizer", "PositionSizer"]:
@@ -49,11 +50,13 @@ def test_installer_resolves_reparse_paths_before_containment_checks():
 def test_installer_validates_all_required_sha256_copies():
     for field in [
         "CanonicalEX5SHA256", "StagedEX5SHA256", "InstalledEX5SHA256", "InstallerSHA256",
+        "UpdaterSHA256",
     ]:
         assert field in SOURCE
     assert "stagedHash != canonicalHash" in SOURCE
     assert "installedHash != canonicalHash" in SOURCE
     assert "uninstallHash != installerHash" in SOURCE
+    assert "updaterHash != installerHash" in SOURCE
     assert "installed uninstaller SHA-256 mismatch" in SOURCE
     assert 'sha256.New()' in SOURCE
 
@@ -76,6 +79,9 @@ def test_upgrade_preflights_existing_destination_ownership_before_staging():
     assert "existing manifest owned-file inventory is not exact" in SOURCE
     assert "verify existing EX5 ownership" in SOURCE
     assert "verify existing uninstaller ownership" in SOURCE
+    assert "verify existing updater ownership" in SOURCE
+    assert "schema == manifestSchema" in SOURCE
+    assert "schema != 1" in SOURCE
 
 
 def test_uninstall_is_manifest_scoped_and_preserves_unrelated_files():
@@ -83,7 +89,7 @@ def test_uninstall_is_manifest_scoped_and_preserves_unrelated_files():
     assert "manifest.InstallResolved" in SOURCE
     assert "manifest.ExpertsResolved" in SOURCE
     assert "policy.Within(currentExpertsResolved, currentProductResolved)" in SOURCE
-    assert "Only the three installer-owned files will be removed" in SOURCE
+    assert "Only the four installer-owned files will be removed" in SOURCE
     assert "Any unrelated files in that directory were preserved" in SOURCE
     assert "os.RemoveAll(" not in SOURCE
 
@@ -120,9 +126,11 @@ def test_uninstall_preflights_all_hash_protected_files_before_first_delete():
     first_remove = run_uninstall.index("removeOwnedFile(ex5Path")
     ex5_verify = run_uninstall.index("verifyOwnedFileHashIfPresent(ex5Path")
     uninstaller_verify = run_uninstall.index("verifyOwnedFileHashIfPresent(uninstallerPath")
+    updater_verify = run_uninstall.index("verifyOwnedFileHashIfPresent(updaterPath")
     manifest_verify = run_uninstall.index("validateRegularNonReparseFile(manifestPath)")
     assert ex5_verify < first_remove
     assert uninstaller_verify < first_remove
+    assert updater_verify < first_remove
     assert manifest_verify < first_remove
     assert "preserving all owned files" in SOURCE
 

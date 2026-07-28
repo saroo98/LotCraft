@@ -35,6 +35,11 @@ uint  lstrcpyW(uint destination,string source);
 ulong lstrcpyW(ulong destination,string source);
 #import
 
+#import "shell32.dll"
+uint  ShellExecuteW(uint hWnd,string operation,string file,string parameters,string directory,int show_command);
+ulong ShellExecuteW(ulong hWnd,string operation,string file,string parameters,string directory,int show_command);
+#import
+
 #define PS_CF_UNICODETEXT 13
 #define PS_GMEM_MOVEABLE  0x0002
 #define PS_WM_KEYDOWN     0x0100
@@ -43,6 +48,7 @@ ulong lstrcpyW(ulong destination,string source);
 #define PS_VK_LBUTTON     0x01
 #define PS_SM_CXDOUBLECLK 36
 #define PS_SM_CYDOUBLECLK 37
+#define PS_SW_HIDE        0
 
 uint PS_PlatformDoubleClickTime()
   {
@@ -252,6 +258,30 @@ bool PS_PlatformLeftButtonDown()
    if(!MQLInfoInteger(MQL_DLLS_ALLOWED)) return(true);
    short state=GetAsyncKeyState(PS_VK_LBUTTON);
    return((state & 0x8000)!=0);
+  }
+
+bool PS_PlatformLaunchUpdater(string &error)
+  {
+   error="";
+   if(!MQLInfoInteger(MQL_DLLS_ALLOWED))
+     {
+      error="Update checks require MT5 'Allow DLL imports' for this EA.";
+      return(false);
+     }
+
+   string product_directory=TerminalInfoString(TERMINAL_DATA_PATH)+"\\MQL5\\Experts\\LotCraft";
+   string updater_path=product_directory+"\\LotCraft-Updater.exe";
+   long result=0;
+   if(_IsX64)
+      result=(long)ShellExecuteW((ulong)0,"open",updater_path,"-check-update",product_directory,PS_SW_HIDE);
+   else
+      result=(long)ShellExecuteW((uint)0,"open",updater_path,"-check-update",product_directory,PS_SW_HIDE);
+   if(result<=32)
+     {
+      error=StringFormat("Windows could not start LotCraft-Updater.exe (ShellExecuteW result %I64d).",result);
+      return(false);
+     }
+   return(true);
   }
 
 #endif

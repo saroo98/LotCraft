@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"lotcraft.local/installer/internal/policy"
+	lotupdate "lotcraft.local/installer/internal/update"
 )
 
 //go:embed embedded_payload.txt
@@ -30,9 +31,11 @@ const (
 	productVersion    = "1.0.0"
 	setupTitle        = "LotCraft 1.0.0 Setup"
 	ex5Name           = "LotCraft.ex5"
+	updaterName       = "LotCraft-Updater.exe"
 	uninstallName     = "LotCraft-Uninstall.exe"
 	manifestName      = "LotCraft-install.json"
 	defaultInstallRel = `MQL5\Experts\LotCraft`
+	manifestSchema    = 2
 
 	fileAttributeDirectory    = 0x00000010
 	fileAttributeReparsePoint = 0x00000400
@@ -88,9 +91,13 @@ type options struct {
 	cleanupTarget string
 	cleanupDir    string
 	cleanupParent int
+	checkUpdate   bool
+	updaterWorker bool
+	productDir    string
 }
 
 type installManifest struct {
+	SchemaVersion             int      `json:"schema_version,omitempty"`
 	Product                   string   `json:"product"`
 	Version                   string   `json:"version"`
 	InstalledAtUTC            string   `json:"installed_at_utc"`
@@ -105,6 +112,7 @@ type installManifest struct {
 	StagedEX5SHA256           string   `json:"staged_ex5_sha256"`
 	InstalledEX5SHA256        string   `json:"installed_ex5_sha256"`
 	InstallerSHA256           string   `json:"installer_sha256"`
+	UpdaterSHA256             string   `json:"updater_sha256,omitempty"`
 	OwnedFiles                []string `json:"owned_files"`
 	ReparseComponentsObserved []string `json:"reparse_components_observed,omitempty"`
 }
@@ -133,6 +141,15 @@ func main() {
 		}
 		return
 	}
+	base := strings.ToLower(filepath.Base(executablePath()))
+	if opt.checkUpdate || opt.updaterWorker || strings.Contains(base, "updater") {
+		if err := runUpdaterMode(opt); err != nil {
+			// Background update-check failures are intentionally silent. The
+			// updater writes the exact reason to its local rotating log.
+			os.Exit(1)
+		}
+		return
+	}
 	logPath := opt.logPath
 	if logPath == "" {
 		logPath = filepath.Join(os.TempDir(), "LotCraft-1.0.0-install.log")
@@ -154,7 +171,6 @@ func main() {
 		return
 	}
 
-	base := strings.ToLower(filepath.Base(executablePath()))
 	if opt.uninstall || strings.Contains(base, "uninstall") {
 		if err := runUninstall(opt, log); err != nil {
 			log.fatal(err)
@@ -178,6 +194,9 @@ func parseOptions() options {
 	flag.StringVar(&opt.cleanupTarget, "cleanup-target", "", "internal post-uninstall cleanup target")
 	flag.StringVar(&opt.cleanupDir, "cleanup-dir", "", "internal post-uninstall product directory")
 	flag.IntVar(&opt.cleanupParent, "cleanup-parent-pid", 0, "internal post-uninstall parent process")
+	flag.BoolVar(&opt.checkUpdate, "check-update", false, "check the latest signed stable release")
+	flag.BoolVar(&opt.updaterWorker, "updater-worker", false, "internal detached updater worker")
+	flag.StringVar(&opt.productDir, "product-dir", "", "internal verified LotCraft installation directory")
 	flag.Parse()
 	return opt
 }
@@ -334,8 +353,21 @@ func runInstall(opt options, log *logger) error {
 		_ = os.Remove(uninstallTemp)
 		return errors.New("staged uninstaller SHA-256 differs from installer")
 	}
+	updaterTemp, updaterHash, err := copyToTempAndHash(selfPath, installPath, ".LotCraft-updater-*.tmp")
+	if err != nil {
+		_ = os.Remove(ex5Temp)
+		_ = os.Remove(uninstallTemp)
+		return fmt.Errorf("stage updater: %w", err)
+	}
+	if updaterHash != installerHash {
+		_ = os.Remove(ex5Temp)
+		_ = os.Remove(uninstallTemp)
+		_ = os.Remove(updaterTemp)
+		return errors.New("staged updater SHA-256 differs from installer")
+	}
 
 	manifest := installManifest{
+		SchemaVersion:             manifestSchema,
 		Product:                   productName,
 		Version:                   productVersion,
 		InstalledAtUTC:            time.Now().UTC().Format(time.RFC3339),
@@ -350,18 +382,21 @@ func runInstall(opt options, log *logger) error {
 		StagedEX5SHA256:           stagedHash,
 		InstalledEX5SHA256:        stagedHash,
 		InstallerSHA256:           installerHash,
-		OwnedFiles:                []string{ex5Name, uninstallName, manifestName},
+		UpdaterSHA256:             updaterHash,
+		OwnedFiles:                []string{ex5Name, updaterName, uninstallName, manifestName},
 		ReparseComponentsObserved: reparseObserved,
 	}
 	manifestTemp, err := writeJSONTemp(manifest, installPath)
 	if err != nil {
 		_ = os.Remove(ex5Temp)
 		_ = os.Remove(uninstallTemp)
+		_ = os.Remove(updaterTemp)
 		return fmt.Errorf("stage install manifest: %w", err)
 	}
 
 	prepared := []*preparedFile{
 		{temp: ex5Temp, final: filepath.Join(installPath, ex5Name)},
+		{temp: updaterTemp, final: filepath.Join(installPath, updaterName)},
 		{temp: uninstallTemp, final: filepath.Join(installPath, uninstallName)},
 		{temp: manifestTemp, final: filepath.Join(installPath, manifestName)},
 	}
@@ -391,7 +426,7 @@ func runInstall(opt options, log *logger) error {
 	finalizePrepared(prepared)
 
 	log.printf("success selected=%s selected_resolved=%s experts_resolved=%s final=%s", terminalRoot, selectedResolved, expertsResolved, installedResolved)
-	log.printf("hash canonical_ex5=%s staged_ex5=%s installed_ex5=%s installer=%s", canonicalHash, stagedHash, installedHash, installerHash)
+	log.printf("hash canonical_ex5=%s staged_ex5=%s installed_ex5=%s installer=%s updater=%s", canonicalHash, stagedHash, installedHash, installerHash, updaterHash)
 	if !opt.quiet {
 		showMessage(setupTitle,
 			"LotCraft 1.0.0 was installed successfully.\n\nFinal destination:\n"+installedResolved+"\n\nSHA-256:\n"+installedHash+"\n\nRestart MetaTrader 5 or refresh the Navigator before attaching the EA.",
@@ -451,6 +486,22 @@ func runUninstall(opt options, log *logger) error {
 	if manifest.Product != productName || manifest.Version != productVersion {
 		return fmt.Errorf("manifest identity mismatch: product=%q version=%q", manifest.Product, manifest.Version)
 	}
+	if manifest.SchemaVersion != manifestSchema {
+		return fmt.Errorf("manifest schema %d is unsupported by this uninstaller", manifest.SchemaVersion)
+	}
+	expectedOwned := map[string]bool{
+		ex5Name: true, updaterName: true, uninstallName: true, manifestName: true,
+	}
+	if len(manifest.OwnedFiles) != len(expectedOwned) {
+		return errors.New("manifest owned-file inventory is not exact")
+	}
+	seenOwned := make(map[string]bool, len(expectedOwned))
+	for _, name := range manifest.OwnedFiles {
+		if filepath.Base(name) != name || !expectedOwned[name] || seenOwned[name] {
+			return errors.New("manifest contains an unexpected, duplicate, or nonlocal owned filename")
+		}
+		seenOwned[name] = true
+	}
 	currentProductResolved, err := resolveExistingPath(productDir)
 	if err != nil {
 		return fmt.Errorf("resolve current product directory: %w", err)
@@ -471,6 +522,7 @@ func runUninstall(opt options, log *logger) error {
 	}
 
 	ex5Path := filepath.Join(productDir, ex5Name)
+	updaterPath := filepath.Join(productDir, updaterName)
 	uninstallerPath := filepath.Join(productDir, uninstallName)
 	// Validate every hash-protected owned file before deleting any of them. This
 	// keeps a tampered uninstaller or payload from leaving an unrecoverable
@@ -481,12 +533,15 @@ func runUninstall(opt options, log *logger) error {
 	if err := verifyOwnedFileHashIfPresent(uninstallerPath, manifest.InstallerSHA256); err != nil {
 		return fmt.Errorf("verify installed uninstaller before uninstall: %w", err)
 	}
+	if err := verifyOwnedFileHashIfPresent(updaterPath, manifest.UpdaterSHA256); err != nil {
+		return fmt.Errorf("verify installed updater before uninstall: %w", err)
+	}
 	if err := validateRegularNonReparseFile(manifestPath); err != nil {
 		return fmt.Errorf("manifest is unsafe: %w", err)
 	}
 
 	if !opt.quiet {
-		message := "Remove LotCraft 1.0.0 from:\n" + currentProductResolved + "\n\nOnly the three installer-owned files will be removed. Unrelated files will be preserved."
+		message := "Remove LotCraft 1.0.0 from:\n" + currentProductResolved + "\n\nOnly the four installer-owned files will be removed. Unrelated files will be preserved."
 		if showMessage(setupTitle, message, mbYesNo|mbIconQuestion|mbSetForeground) != idYes {
 			return errors.New("uninstall cancelled")
 		}
@@ -494,6 +549,9 @@ func runUninstall(opt options, log *logger) error {
 
 	if err := removeOwnedFile(ex5Path, manifest.InstalledEX5SHA256, log); err != nil {
 		return fmt.Errorf("remove installed EX5: %w", err)
+	}
+	if err := removeOwnedFile(updaterPath, manifest.UpdaterSHA256, log); err != nil {
+		return fmt.Errorf("remove installed updater: %w", err)
 	}
 
 	if sameWindowsPath(uninstallerPath, self) {
@@ -633,6 +691,7 @@ func validateExistingInstallOwnership(installPath, installResolved, expertsResol
 	manifestPath := filepath.Join(installPath, manifestName)
 	finalPaths := []string{
 		filepath.Join(installPath, ex5Name),
+		filepath.Join(installPath, updaterName),
 		filepath.Join(installPath, uninstallName),
 		manifestPath,
 	}
@@ -664,8 +723,19 @@ func validateExistingInstallOwnership(installPath, installResolved, expertsResol
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return fmt.Errorf("parse existing install manifest: %w", err)
 	}
-	if manifest.Product != productName || manifest.Version != productVersion {
+	if manifest.Product != productName {
 		return fmt.Errorf("existing manifest identity mismatch: product=%q version=%q", manifest.Product, manifest.Version)
+	}
+	existingVersion, err := lotupdate.ParseVersion(manifest.Version)
+	if err != nil {
+		return fmt.Errorf("existing manifest version is invalid: %w", err)
+	}
+	installingVersion, err := lotupdate.ParseVersion(productVersion)
+	if err != nil {
+		return fmt.Errorf("installer version is invalid: %w", err)
+	}
+	if existingVersion.Compare(installingVersion) > 0 {
+		return fmt.Errorf("refusing to downgrade existing LotCraft %s to %s", manifest.Version, productVersion)
 	}
 	if !sameWindowsPath(manifest.InstallResolved, installResolved) ||
 		!sameWindowsPath(manifest.ExpertsResolved, expertsResolved) {
@@ -676,10 +746,19 @@ func validateExistingInstallOwnership(installPath, installResolved, expertsResol
 		return errors.New("existing product directory is not inside the verified MQL5\\Experts root")
 	}
 
+	schema := manifest.SchemaVersion
+	if schema == 0 {
+		schema = 1
+	}
 	expectedOwned := map[string]bool{
 		ex5Name:       true,
 		uninstallName: true,
 		manifestName:  true,
+	}
+	if schema == manifestSchema {
+		expectedOwned[updaterName] = true
+	} else if schema != 1 {
+		return fmt.Errorf("existing manifest schema %d is unsupported", manifest.SchemaVersion)
 	}
 	if len(manifest.OwnedFiles) != len(expectedOwned) {
 		return errors.New("existing manifest owned-file inventory is not exact")
@@ -696,6 +775,14 @@ func validateExistingInstallOwnership(installPath, installResolved, expertsResol
 	}
 	if err := verifyOwnedFileHashIfPresent(filepath.Join(installPath, uninstallName), manifest.InstallerSHA256); err != nil {
 		return fmt.Errorf("verify existing uninstaller ownership: %w", err)
+	}
+	if schema == manifestSchema {
+		if manifest.UpdaterSHA256 == "" {
+			return errors.New("existing updater hash is missing")
+		}
+		if err := verifyOwnedFileHashIfPresent(filepath.Join(installPath, updaterName), manifest.UpdaterSHA256); err != nil {
+			return fmt.Errorf("verify existing updater ownership: %w", err)
+		}
 	}
 	return nil
 }

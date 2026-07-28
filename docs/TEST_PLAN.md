@@ -19,6 +19,7 @@
 | Installer policy | `installer/internal/policy/*`, `tests/test_installer_contract.py` | Windows path normalization, UNC paths, containment, deceptive prefixes, reparse resolution, atomic commit/rollback, owned-file uninstall, predelete hash validation |
 | Installer PE | `tests/test_installer_binary.py` | Windows x64 GUI PE, image version, version resource strings, zero timestamp, PE checksum |
 | Release verifier | `tests/test_release_verifier.py` | UTF-16 compiler log parsing, zero-warning requirement, staged hash equality, installed hash requirement |
+| Signed updater | `installer/internal/update/*`, `installer/cmd/setup/updater_windows_test.go`, `tests/test_updater_contract.py` | Stable semantic versions, API parsing, signature and descriptor verification, limits/timeouts/redirects, daily deferral, path-scoped mutex, legacy-manifest migration, updater launch contract |
 
 Automated command:
 
@@ -119,8 +120,11 @@ Use minimum practical demo volume or a mocked request gateway. Never use a live 
 7. Junction, symbolic link, and mount-point cases with accepted and rejected resolved destinations.
 8. Confirm no old Position Sizer path changes.
 9. Uninstall from the copied uninstaller and from setup `-uninstall` mode.
-10. Tampered EX5, uninstaller, or manifest must fail closed and preserve unrelated files.
-11. Verify canonical, staged, installed, and installer SHA-256 values.
+10. Tampered EX5, updater, uninstaller, or manifest must fail closed and preserve unrelated files.
+11. Verify migration from the legacy three-file v1.0.0 manifest to the four-file updater-aware manifest.
+12. Inject a failure at every atomic commit position and verify the prior installation is restored.
+13. Verify updater mutex exclusion, once-per-24-hour checks, 24-hour deferral, stable-only selection, API parsing, redirects, timeouts, response limits, signatures, sizes, and hashes.
+14. Verify canonical, staged, installed, and installer SHA-256 values plus signed bootstrap metadata.
 
 ## 10. Long-duration and performance checks
 

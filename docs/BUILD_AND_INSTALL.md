@@ -19,6 +19,7 @@ The installer writes only these files:
 ```text
 <terminal data directory>\MQL5\Experts\LotCraft\
   LotCraft.ex5
+  LotCraft-Updater.exe
   LotCraft-Uninstall.exe
   LotCraft-install.json
 ```
@@ -33,7 +34,7 @@ Run:
 <terminal data directory>\MQL5\Experts\LotCraft\LotCraft-Uninstall.exe
 ```
 
-The uninstaller validates the installation manifest and hashes before removal. It removes only the three LotCraft-owned files and preserves unrelated files.
+The uninstaller validates the installation manifest and hashes before removal. It removes only the four LotCraft-owned files and preserves unrelated files.
 
 ## Build requirements
 
@@ -42,6 +43,15 @@ The uninstaller validates the installation manifest and hashes before removal. I
 - Go 1.23 or newer
 - Python 3.11 or newer
 - PowerShell 5.1 or newer
+- An Ed25519 release-signing key stored outside the repository
+
+The default private-key location is:
+
+```text
+%LOCALAPPDATA%\LotCraft\Signing\update-ed25519.key
+```
+
+The matching public key is tracked in `installer\update-public-key.txt` and embedded in the updater. The private key must remain restricted to the current Windows user and must never be committed or uploaded.
 
 ## Test
 
@@ -66,8 +76,11 @@ The release script:
 4. Builds a deterministic Windows GUI installer with the EX5 embedded.
 5. Removes the temporary embedded payload source.
 6. Stamps and verifies Windows version metadata.
-7. Stages the installer and EX5 under `release\LotCraft-1.0.0`.
-8. Writes a machine-local release verification report.
+7. Embeds the pinned Ed25519 public key in the installer/updater.
+8. Stages the installer and EX5 under `release\LotCraft-1.0.0`.
+9. Signs the exact final installer metadata as `LotCraft-update.json` and `LotCraft-update.sig`.
+10. Verifies the signature and installer descriptor.
+11. Writes a machine-local release verification report.
 
 Generated binaries, logs, hashes and machine-specific verification evidence are excluded from Git.
 
@@ -88,6 +101,19 @@ This local verification confirms that:
 - the canonical and staged EX5 files are byte-identical;
 - the installer completed successfully;
 - the installed EX5 is byte-identical to the canonical build.
+- the installed updater and manifest use the four-file updater-aware schema.
+
+## Update-release contract
+
+Every stable GitHub release must publish:
+
+```text
+LotCraft-<version>-Setup.exe
+LotCraft-update.json
+LotCraft-update.sig
+```
+
+The signed JSON records the schema, product, stable semantic version, tag, installer filename, byte size, and SHA-256. The detached signature covers the exact JSON bytes. Drafts, prereleases, downgrades, bad signatures, unexpected hosts, redirects, hashes, sizes, and oversized downloads are rejected.
 
 ## Controlled explicit-payload mode
 

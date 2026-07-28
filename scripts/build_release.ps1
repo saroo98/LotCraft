@@ -5,7 +5,8 @@ param(
     [switch]$Install,
     [switch]$AllowReparse,
     [string]$PythonCommand = "python",
-    [string]$ReleaseDirectory
+    [string]$ReleaseDirectory,
+    [string]$UpdateSigningKeyPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,8 +27,19 @@ if ([string]::IsNullOrWhiteSpace($ReleaseDirectory)) {
 $ReleaseDirectory = [System.IO.Path]::GetFullPath($ReleaseDirectory)
 $StagedEx5 = Join-Path $ReleaseDirectory "LotCraft.ex5"
 $StagedInstaller = Join-Path $ReleaseDirectory "LotCraft-1.0.0-Setup.exe"
+$UpdateManifest = Join-Path $ReleaseDirectory "LotCraft-update.json"
+$UpdateSignature = Join-Path $ReleaseDirectory "LotCraft-update.sig"
+$ReleaseChecksum = Join-Path $ReleaseDirectory "LotCraft-1.0.0-SHA256.txt"
+$UpdatePublicKeyFile = Join-Path $ProjectRoot "installer\update-public-key.txt"
 $EmbeddedEx5 = Join-Path $ProjectRoot "installer\cmd\setup\embedded_payload.txt"
 $RawInstaller = Join-Path $BuildRoot ".tmp\LotCraft-1.0.0-Setup.unstamped.exe"
+if ([string]::IsNullOrWhiteSpace($UpdateSigningKeyPath)) {
+    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        throw "LOCALAPPDATA is unavailable. Supply -UpdateSigningKeyPath explicitly."
+    }
+    $UpdateSigningKeyPath = Join-Path $env:LOCALAPPDATA "LotCraft\Signing\update-ed25519.key"
+}
+$UpdateSigningKeyPath = [System.IO.Path]::GetFullPath($UpdateSigningKeyPath)
 
 function Resolve-MetaEditorPath {
     param([string]$Explicit)
@@ -69,6 +81,16 @@ function Get-CompileSummary {
 }
 
 $MetaEditor = Resolve-MetaEditorPath $MetaEditorPath
+if (-not (Test-Path $UpdatePublicKeyFile -PathType Leaf)) {
+    throw "The pinned update public key is missing: $UpdatePublicKeyFile"
+}
+if (-not (Test-Path $UpdateSigningKeyPath -PathType Leaf)) {
+    throw "The private update signing key is missing: $UpdateSigningKeyPath"
+}
+$UpdatePublicKey = ([System.IO.File]::ReadAllText($UpdatePublicKeyFile)).Trim()
+if ($UpdatePublicKey -notmatch '^[A-Za-z0-9+/]{43}=$') {
+    throw "The pinned update public key is not a valid base64 Ed25519 public key."
+}
 New-Item -ItemType Directory -Path $CompileRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $ReleaseDirectory -Force | Out-Null
 Remove-Item $CompileLog -Force -ErrorAction SilentlyContinue
@@ -88,7 +110,8 @@ Copy-Item $CanonicalEx5 $EmbeddedEx5 -Force
 try {
     Push-Location (Join-Path $ProjectRoot "installer")
     try {
-        & go build -trimpath -buildvcs=false -ldflags="-s -w -H=windowsgui -buildid=" -o $RawInstaller .\cmd\setup
+        $GoLinkerFlags = "-s -w -H=windowsgui -buildid= -X lotcraft.local/installer/internal/update.TrustedPublicKeyBase64=$UpdatePublicKey"
+        & go build -trimpath -buildvcs=false "-ldflags=$GoLinkerFlags" -o $RawInstaller .\cmd\setup
         if ($LASTEXITCODE -ne 0) { throw "Go installer build failed with exit code $LASTEXITCODE" }
     }
     finally { Pop-Location }
@@ -108,6 +131,31 @@ finally {
 Copy-Item $CanonicalEx5 $StagedEx5 -Force
 Copy-Item $InstallerSource $StagedInstaller -Force
 
+Push-Location (Join-Path $ProjectRoot "installer")
+try {
+    & go run .\cmd\releasesign sign `
+        -private-key $UpdateSigningKeyPath `
+        -installer $StagedInstaller `
+        -version $Version `
+        -tag "v$Version" `
+        -manifest $UpdateManifest `
+        -signature $UpdateSignature
+    if ($LASTEXITCODE -ne 0) { throw "Release signing failed with exit code $LASTEXITCODE" }
+    & go run .\cmd\releasesign verify `
+        -public-key-file $UpdatePublicKeyFile `
+        -manifest $UpdateManifest `
+        -signature $UpdateSignature
+    if ($LASTEXITCODE -ne 0) { throw "Release signature verification failed with exit code $LASTEXITCODE" }
+}
+finally { Pop-Location }
+
+$InstallerDigest = (Get-FileHash $StagedInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+[System.IO.File]::WriteAllText(
+    $ReleaseChecksum,
+    "$InstallerDigest  LotCraft-1.0.0-Setup.exe`n",
+    (New-Object System.Text.UTF8Encoding($false))
+)
+
 $verifyArgs = @(
     (Join-Path $ProjectRoot "scripts\verify_release.py"),
     "--project-root", $ProjectRoot,
@@ -115,7 +163,10 @@ $verifyArgs = @(
     "--compile-log", $CompileLog,
     "--canonical-ex5", $CanonicalEx5,
     "--staged-ex5", $StagedEx5,
-    "--installer", $StagedInstaller
+    "--installer", $StagedInstaller,
+    "--update-manifest", $UpdateManifest,
+    "--update-signature", $UpdateSignature,
+    "--update-public-key", $UpdatePublicKeyFile
 )
 
 if ($Install) {
@@ -150,5 +201,7 @@ Write-Host "Compile result: 0 errors, 0 warnings"
 Write-Host "Canonical EX5: $CanonicalEx5"
 Write-Host "Staged EX5: $StagedEx5"
 Write-Host "Installer: $StagedInstaller"
+Write-Host "Signed update manifest: $UpdateManifest"
+Write-Host "Signed update signature: $UpdateSignature"
 if ($Install) { Write-Host "Installed EX5: $InstalledEx5" }
 Write-Host "Release verification: $(Join-Path $ReleaseDirectory 'RELEASE-VERIFICATION.json')"

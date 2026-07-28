@@ -13,7 +13,7 @@ The implementation is independent of any Position Sizer product. Runtime objects
 | `LotCraft.mq5` | Lifecycle, event routing, controller state machines, control dispatch, confirmation flow, refresh cadence | One authoritative `PSModel`, current market snapshot, calculation result, editor state, pointer state, UI state |
 | `PS_Types.mqh` | Identity constants, enums, domain records, finite checks, tick and volume normalization, formatting, explicit structure copies | No external resources |
 | `PS_Logging.mqh` | `LotCraft`-prefixed diagnostics, duplicate-message throttling, performance-budget instrumentation | In-memory rate-limit slots |
-| `PS_Platform.mqh` | Isolated Win32 integration for Unicode clipboard, native F9 New Order request, left-button state, and chart-relative pointer recovery | Temporary global memory transferred to the clipboard; no persistent hooks |
+| `PS_Platform.mqh` | Isolated Win32 integration for Unicode clipboard, native F9 New Order request, left-button state, chart-relative pointer recovery, and asynchronous updater launch | Temporary global memory transferred to the clipboard; no persistent hooks |
 | `PS_Market.mqh` | Live account, symbol, quote, session, permission, and directional-exposure acquisition | Current `PSMarketSnapshot` only |
 | `PS_Risk.mqh` | Model initialization, direction/order-mode transitions, pending subtype inference, protective-price validation, risk authority, one-lot loss, broker-valid volume | `PSCalcResult`; updates the dependent requested-risk view in `PSModel` |
 | `PS_Editor.mqh` | Custom numeric-edit state machine | Raw text, cursor, anchor, selection, and pre-edit model snapshot |
@@ -135,10 +135,14 @@ The Windows x64 installer is a separate Go program with the canonical `LotCraft.
 2. Resolves the selected path, `MQL5\Experts`, and the dedicated product directory through Windows file handles.
 3. Detects reparse components and requires explicit approval while still enforcing final containment inside the resolved Experts root.
 4. Hashes canonical, staged, and installed EX5 copies plus the installer.
-5. Commits the EX5, copied uninstaller, and manifest with sibling backups and rollback.
+5. Commits the EX5, copied updater, copied uninstaller, and manifest with sibling backups and rollback.
 6. Uninstalls only fixed LotCraft-owned file names after manifest, path, reparse, and hash validation. It never calls recursive directory deletion.
 
 Source files are not installer-owned and are not included in the end-user install set.
+
+The EA launches the updater once, ten seconds after initialization, and never in Strategy Tester. The installed updater first verifies its four-file schema and hash, then runs the check from a verified temporary copy so an approved installer can replace the installed updater atomically. An installation-scoped Windows mutex prevents overlapping checks across charts.
+
+The updater accepts only a newer stable semantic version from the latest GitHub release. It verifies an Ed25519 signature over the exact release JSON, then verifies the installer’s signed byte size and SHA-256 before execution. Local per-installation state and a rotating log live under `%LOCALAPPDATA%\LotCraft\Updater`; no account, trading, credential, or telemetry data is collected.
 
 ## 12. Performance and observability
 

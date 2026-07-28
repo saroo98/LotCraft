@@ -34,6 +34,8 @@ string g_active_symbol="";
 bool   g_pointer_motion_pending=false;
 int    g_pointer_motion_x=0;
 int    g_pointer_motion_y=0;
+bool   g_update_check_launched=false;
+ulong  g_update_check_start_ms=0;
 PSFieldId g_last_editor_click_field=PS_FIELD_NONE;
 PSControlId g_copy_feedback_control=PS_CTRL_NONE;
 ulong  g_control_last_action[PS_CTRL_COUNT];
@@ -962,6 +964,8 @@ int OnInit()
 
    PS_Recalculate(false);
    g_initialized=true;
+   g_update_check_launched=(bool)MQLInfoInteger(MQL_TESTER);
+   g_update_check_start_ms=GetTickCount64();
    PS_RenderIfDirty();
    PS_LogInfo(StringFormat("%s %s initialized on %s chart %I64d.",PS_PRODUCT_NAME,PS_VERSION_TEXT,_Symbol,ChartID()));
    return(INIT_SUCCEEDED);
@@ -1001,6 +1005,15 @@ void OnTimer()
   {
    if(!g_initialized) return;
    ulong now=GetTickCount64();
+   if(!g_update_check_launched && now-g_update_check_start_ms>=10000)
+     {
+      // Launch once and return immediately. The detached updater owns all
+      // network, prompting, verification, and installation work.
+      g_update_check_launched=true;
+      string update_error="";
+      if(!PS_PlatformLaunchUpdater(update_error))
+         PS_LogWarningRateLimited("updater.launch",update_error,60000);
+     }
 
    int pointer_x=g_pointer.last_x;
    int pointer_y=g_pointer.last_y;

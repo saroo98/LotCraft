@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,6 +75,9 @@ def main() -> int:
     parser.add_argument("--staged-ex5", type=Path)
     parser.add_argument("--installed-ex5", type=Path)
     parser.add_argument("--installer", type=Path)
+    parser.add_argument("--update-manifest", type=Path)
+    parser.add_argument("--update-signature", type=Path)
+    parser.add_argument("--update-public-key", type=Path)
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--output-sums", type=Path)
     parser.add_argument("--require-installed", action="store_true")
@@ -86,6 +90,9 @@ def main() -> int:
     staged_ex5 = (args.staged_ex5 or release_dir / f"{PRODUCT}.ex5").resolve()
     installer = (args.installer or release_dir / f"{PRODUCT}-{VERSION}-Setup.exe").resolve()
     installed_ex5 = args.installed_ex5.resolve() if args.installed_ex5 else None
+    update_manifest = args.update_manifest.resolve() if args.update_manifest else None
+    update_signature = args.update_signature.resolve() if args.update_signature else None
+    update_public_key = args.update_public_key.resolve() if args.update_public_key else None
     output_json = (args.output_json or release_dir / "RELEASE-VERIFICATION.json").resolve()
     output_sums = (args.output_sums or release_dir / "SHA256SUMS.txt").resolve()
 
@@ -100,6 +107,51 @@ def main() -> int:
         "sha256": None,
         "not_requested": True,
     }
+    signed_update_requested = any((update_manifest, update_signature, update_public_key))
+    signed_update = {
+        "required": signed_update_requested,
+        "manifest": artifact_record(update_manifest) if update_manifest else None,
+        "signature": artifact_record(update_signature) if update_signature else None,
+        "public_key": artifact_record(update_public_key) if update_public_key else None,
+        "signature_verified": False,
+        "installer_descriptor_matches": False,
+        "error": None,
+    }
+    if signed_update_requested:
+        if not all((update_manifest, update_signature, update_public_key)):
+            signed_update["error"] = "All signed-update paths must be supplied together."
+        elif not all(path.is_file() for path in (update_manifest, update_signature, update_public_key)):
+            signed_update["error"] = "One or more signed-update artifacts are missing."
+        else:
+            verify = subprocess.run(
+                [
+                    "go", "run", "./cmd/releasesign", "verify",
+                    "-public-key-file", str(update_public_key),
+                    "-manifest", str(update_manifest),
+                    "-signature", str(update_signature),
+                ],
+                cwd=project / "installer",
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            signed_update["signature_verified"] = verify.returncode == 0
+            if verify.returncode != 0:
+                signed_update["error"] = (verify.stderr or verify.stdout).strip()
+            try:
+                metadata = json.loads(update_manifest.read_text(encoding="utf-8"))
+                descriptor = metadata["installer"]
+                signed_update["installer_descriptor_matches"] = bool(
+                    metadata["schema_version"] == 1
+                    and metadata["product"] == PRODUCT
+                    and metadata["version"] == VERSION
+                    and metadata["tag"] == f"v{VERSION}"
+                    and descriptor["name"] == installer.name
+                    and descriptor["size"] == setup["size"]
+                    and descriptor["sha256"].lower() == setup["sha256"]
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                signed_update["error"] = f"Invalid signed update metadata: {exc}"
 
     canonical_nonempty = bool(canonical["exists"] and canonical["size"] and canonical["size"] > 0)
     staged_nonempty = bool(staged["exists"] and staged["size"] and staged["size"] > 0)
@@ -113,7 +165,16 @@ def main() -> int:
         and installed["sha256"] == canonical["sha256"]
     )
 
-    stage_passed = bool(compile_info["passed"] and canonical_staged_equal and setup_nonempty)
+    signed_update_passed = bool(
+        not signed_update_requested
+        or (signed_update["signature_verified"] and signed_update["installer_descriptor_matches"])
+    )
+    stage_passed = bool(
+        compile_info["passed"]
+        and canonical_staged_equal
+        and setup_nonempty
+        and signed_update_passed
+    )
     complete = bool(stage_passed and (installed_equal if args.require_installed else True))
 
     report = {
@@ -126,6 +187,7 @@ def main() -> int:
             "staged_installer_ex5": staged,
             "installed_ex5": installed,
             "installer": setup,
+            "signed_update": signed_update,
         },
         "comparisons": {
             "canonical_equals_staged": canonical_staged_equal,
@@ -134,6 +196,7 @@ def main() -> int:
         "requirements": {
             "installed_ex5_required": args.require_installed,
             "stage_passed": stage_passed,
+            "signed_update_passed": signed_update_passed,
             "complete": complete,
         },
     }

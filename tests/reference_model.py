@@ -107,6 +107,7 @@ class Result:
     actual_money: float = 0.0
     actual_percent: float = 0.0
     volume_capped: bool = False
+    volume_raised_to_minimum: bool = False
 
 
 def is_positive_finite(value: float) -> bool:
@@ -276,13 +277,15 @@ def calculate(model: Model, market: Market) -> Result:
             cap = min(cap, max(0.0, market.volume_limit - exposure))
         if cap + market.volume_step * 1e-9 < market.volume_min:
             raise ValueError("no volume remains")
-        volume_capped = raw > cap + market.volume_step * 1e-9
-        volume = floor_volume(raw, market.volume_min, cap, market.volume_step)
+        volume_epsilon = market.volume_step * 1e-9
+        volume_capped = raw > cap + volume_epsilon
+        volume_raised_to_minimum = raw + volume_epsilon < market.volume_min
+        volume = market.volume_min if volume_raised_to_minimum else floor_volume(raw, market.volume_min, cap, market.volume_step)
         if volume <= 0.0:
-            raise ValueError("below minimum")
+            raise ValueError("invalid volume")
         actual_money = one_lot_risk * volume
         tolerance = max(1e-9, abs(requested_money) * 1e-12)
-        if actual_money > requested_money + tolerance:
+        if not volume_raised_to_minimum and actual_money > requested_money + tolerance:
             volume = floor_volume(volume - market.volume_step, market.volume_min, cap, market.volume_step)
             if volume <= 0.0:
                 raise ValueError("minimum exceeds requested risk")
@@ -302,6 +305,7 @@ def calculate(model: Model, market: Market) -> Result:
             actual_money=actual_money,
             actual_percent=actual_money / basis * 100.0,
             volume_capped=volume_capped,
+            volume_raised_to_minimum=volume_raised_to_minimum,
         )
     except ValueError as exc:
         return Result(valid=False, error=str(exc))

@@ -943,6 +943,21 @@ string PS_UIGroupDecimalText(const string source)
    return(sign+grouped+fraction);
   }
 
+string PS_UIRiskMoneyDisplay(const PSModel &model,const PSCalcResult &calc,
+                             const PSMarketSnapshot &market,const PSEditorState &editor)
+  {
+   if(editor.active && editor.field==PS_FIELD_RISK_MONEY)
+      return(PS_UIFieldDisplay(PS_FIELD_RISK_MONEY,model,calc,market,editor));
+
+   string requested=PS_UIGroupDecimalText(
+      PS_MoneyText(calc.requested_money>0.0 ? calc.requested_money : model.requested_risk_money,market));
+   if(!calc.valid) return(requested);
+
+   string actual=PS_UIGroupDecimalText(PS_MoneyText(calc.actual_money,market));
+   if(actual==requested) return(requested);
+   return(requested+" ("+actual+")");
+  }
+
 void PS_UIRenderEditor(const PSUIState &ui,const PSEditorState &editor)
   {
    if(!editor.active)
@@ -1114,7 +1129,7 @@ void PS_UIRenderLegacyReference(PSUIState &ui,const PSModel &model,const PSCalcR
                 (risk_percent_selected ? PS_CLR_SELECTION : (risk_percent_focus ? PS_CLR_FIELD_FOCUS : PS_CLR_FIELD)),
                 (risk_percent_focus ? PS_CLR_FOCUS : (model.risk_authority==PS_RISK_PERCENT ? PS_CLR_ACCENT : editable_border)),
                 PS_CLR_TEXT,true,9,"Consolas");
-   PS_UIControl(ui,PS_CTRL_RISK_MONEY_FIELD,PS_UIFieldDisplay(PS_FIELD_RISK_MONEY,model,calc,market,editor),
+   PS_UIControl(ui,PS_CTRL_RISK_MONEY_FIELD,PS_UIRiskMoneyDisplay(model,calc,market,editor),
                 (risk_money_selected ? PS_CLR_SELECTION : (risk_money_focus ? PS_CLR_FIELD_FOCUS : PS_CLR_FIELD)),
                 (risk_money_focus ? PS_CLR_FOCUS : (model.risk_authority==PS_RISK_MONEY ? PS_CLR_ACCENT : editable_border)),
                 PS_CLR_TEXT,true,9,"Consolas");
@@ -1454,9 +1469,7 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
                           PS_UIFieldDisplay(PS_FIELD_RISK_PERCENT,model,calc,market,editor),
                            editor,PS_FIELD_RISK_PERCENT,false,model.risk_authority==PS_RISK_PERCENT,11,12);
    PS_PremiumCompactField(ui,PS_CTRL_RISK_MONEY_FIELD,
-                          (editor.active && editor.field==PS_FIELD_RISK_MONEY
-                           ? PS_UIFieldDisplay(PS_FIELD_RISK_MONEY,model,calc,market,editor)
-                           : PS_UIGroupDecimalText(PS_UIFieldDisplay(PS_FIELD_RISK_MONEY,model,calc,market,editor))),
+                          PS_UIRiskMoneyDisplay(model,calc,market,editor),
                            editor,PS_FIELD_RISK_MONEY,false,model.risk_authority==PS_RISK_MONEY,11,12);
    PS_PremiumCompactField(ui,PS_CTRL_POSITION_SIZE,
                           PS_UIGroupDecimalText(PS_VolumeText(calc.volume,market)),
@@ -1622,9 +1635,7 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
                           editor,PS_FIELD_RISK_PERCENT,false,
                            model.risk_authority==PS_RISK_PERCENT,11,13);
    PS_PremiumCompactField(ui,PS_CTRL_RISK_MONEY_FIELD,
-                          (editor.active && editor.field==PS_FIELD_RISK_MONEY
-                           ? PS_UIFieldDisplay(PS_FIELD_RISK_MONEY,model,calc,market,editor)
-                           : PS_UIGroupDecimalText(PS_UIFieldDisplay(PS_FIELD_RISK_MONEY,model,calc,market,editor))),
+                          PS_UIRiskMoneyDisplay(model,calc,market,editor),
                           editor,PS_FIELD_RISK_MONEY,false,
                            model.risk_authority==PS_RISK_MONEY,11,13);
    PS_PremiumCompactField(ui,PS_CTRL_POSITION_SIZE,

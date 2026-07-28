@@ -60,7 +60,7 @@ void PS_ClearTransientStatus()
 
 void PS_SaveState()
   {
-   if(g_persistence_base!="") PS_PersistenceSave(g_persistence_base,g_model);
+   if(g_persistence_base!="") PS_PersistenceSave(g_persistence_base,g_market,g_model);
   }
 
 void PS_Recalculate(const bool clear_status=false)
@@ -297,31 +297,10 @@ void PS_DoTrade()
          PS_SetStatus("Trade changed or became invalid after confirmation: "+error,true,7000);
          return;
         }
-      if(!PS_TradeSnapshotsMateriallyEqual(confirmed,refreshed,g_market))
-        {
-         int updated=MessageBox("The executable request changed after the first confirmation.\n\n"+
-                                PS_TradeConfirmationText(refreshed,g_market),
-                                PS_PRODUCT_NAME+" updated confirmation",
-                                MB_YESNO|MB_ICONQUESTION);
-         if(updated!=IDYES)
-           {
-            PS_SetStatus("Updated trade canceled. No request was sent.",false,4000);
-            return;
-           }
-         PSTradeSnapshot final_snapshot;
-         if(!PS_BuildFreshTradeSnapshot(final_snapshot,error))
-           {
-            PS_SetStatus("Trade became invalid after the updated confirmation: "+error,true,7000);
-            return;
-           }
-         if(!PS_TradeSnapshotsMateriallyEqual(refreshed,final_snapshot,g_market))
-           {
-            PS_SetStatus("The market changed again before send. No request was sent; click the trade action to retry.",true,7000);
-            return;
-           }
-         PS_CopyTradeSnapshot(confirmed,final_snapshot);
-        }
-      else PS_CopyTradeSnapshot(confirmed,refreshed);
+      // Confirmation is intentionally one-stage. Quotes can move while the
+      // dialog is open, so execute the freshly revalidated request without
+      // asking the user to approve a second, near-identical dialog.
+      PS_CopyTradeSnapshot(confirmed,refreshed);
      }
 
    g_trade_in_flight=true;
@@ -533,10 +512,7 @@ bool PS_UpdateLevelFromPointer(const PSCaptureMode capture,const int x,const int
    if(capture==PS_CAPTURE_HANDLE_ENTRY)
      {
        if(g_model.order_mode==PS_ORDER_INSTANT)
-         {
-          PS_SetStatus("Entry handle is market-bound in Instant mode. Select Pending to move Entry.",false,5000);
-          return(false);
-         }
+          PS_ModelChangeOrderMode(g_model,g_market,PS_ORDER_PENDING);
        previous=g_model.entry;
        g_model.entry=price;
      }
@@ -772,11 +748,6 @@ void PS_MouseMoveCaptured(const int x,const int y)
          int dx=MathAbs(x-g_pointer.start_x);
          int dy=MathAbs(y-g_pointer.start_y);
          if(MathMax(dx,dy)<PS_HANDLE_DRAG_THRESHOLD_PX) return;
-         if(g_pointer.capture==PS_CAPTURE_HANDLE_ENTRY && g_model.order_mode==PS_ORDER_INSTANT)
-           {
-            PS_SetStatus("Entry handle is market-bound in Instant mode. Select Pending to move Entry.",false,5000);
-            return;
-           }
          g_pointer.drag_started=true;
         }
       if(x!=g_pointer.applied_x || y!=g_pointer.applied_y)
@@ -850,10 +821,11 @@ void PS_MouseRelease(const int x,const int y)
       // Intermediate pointer updates only move the chart line and handle.
       // Calculate position sizing once from the final price.
       PS_Recalculate(false);
-      PS_UIApplyLineLock(g_ui,"line.entry");
-      PS_UIApplyLineLock(g_ui,"line.stop");
-      PS_UIApplyLineLock(g_ui,"line.take");
-     }
+       PS_UIApplyLineLock(g_ui,"line.entry");
+       PS_UIApplyLineLock(g_ui,"line.stop");
+       PS_UIApplyLineLock(g_ui,"line.take");
+       PS_SaveState();
+      }
    PS_ResetCapture(x,y);
    PS_RenderIfDirty();
    if(panel_dragged) PS_UIEndPanelDrag(g_ui);
@@ -965,7 +937,7 @@ int OnInit()
    PS_ModelInitialize(g_model,g_market);
    PS_ModelEnsureInitialPrices(g_model,g_market);
    g_persistence_base=PS_PersistenceBase(g_market);
-   PS_PersistenceLoad(g_persistence_base,g_model);
+   PS_PersistenceLoad(g_persistence_base,g_market,g_model);
    // Commission controls are intentionally absent from the compact panel.
    // Do not let a previously persisted hidden value affect position sizing.
    g_model.commission_mode=PS_COMMISSION_ROUND_TRIP;

@@ -217,6 +217,7 @@ struct PSCalcResult
    bool quote_valid;
    bool tp_enabled;
    bool volume_capped;
+   bool volume_raised_to_minimum;
    bool pending_ambiguous;
    string error;
    string notice;

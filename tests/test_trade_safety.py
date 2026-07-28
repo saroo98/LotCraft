@@ -80,56 +80,21 @@ def test_unchanged_confirmation_sends_once():
     assert gate.send_calls == 1
 
 
-def test_material_change_requires_updated_confirmation():
+def test_material_change_uses_refreshed_request_without_second_confirmation():
     gate = TradeGate()
     first = RequestSnapshot(entry=1.1002, actual_risk=100)
     refreshed = replace(first, entry=1.1003, actual_risk=101)
     result = execute_trade(
         gate,
         now_ms=1000,
-        snapshots=[first, refreshed, refreshed],
+        snapshots=[first, refreshed],
         confirmation_enabled=True,
-        approvals=[True, True],
+        approvals=[True],
         send=accepted_send,
     )
     assert result.success
-    assert result.confirmations == 2
+    assert result.confirmations == 1
     assert gate.send_calls == 1
-
-
-def test_updated_confirmation_cancel_sends_nothing():
-    gate = TradeGate()
-    first = RequestSnapshot()
-    refreshed = replace(first, entry=1.1003)
-    result = execute_trade(
-        gate,
-        now_ms=1000,
-        snapshots=[first, refreshed, refreshed],
-        confirmation_enabled=True,
-        approvals=[True, False],
-        send=accepted_send,
-    )
-    assert result.reason == "updated confirmation canceled"
-    assert not result.request_sent
-    assert gate.send_calls == 0
-
-
-def test_second_material_change_aborts_without_send():
-    gate = TradeGate()
-    first = RequestSnapshot(entry=1.1002)
-    refreshed = replace(first, entry=1.1003)
-    final = replace(first, entry=1.1004)
-    result = execute_trade(
-        gate,
-        now_ms=1000,
-        snapshots=[first, refreshed, final],
-        confirmation_enabled=True,
-        approvals=[True, True],
-        send=accepted_send,
-    )
-    assert result.reason == "changed again before send"
-    assert not result.request_sent
-    assert gate.send_calls == 0
 
 
 @pytest.mark.parametrize("retcode", ["REQUOTE", "INVALID_STOPS", "INVALID_VOLUME", "INVALID_FILL", "MARKET_CLOSED", "REJECT"])

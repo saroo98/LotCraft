@@ -117,19 +117,7 @@ def execute_trade(
             return ExecutionResult(False, False, "canceled", confirmations)
         if len(snapshots) < 2:
             return ExecutionResult(False, False, "refresh unavailable", confirmations)
-        refreshed = snapshots[1]
-        if refreshed != selected:
-            confirmations += 1
-            if not next(approvals_iter, False):
-                return ExecutionResult(False, False, "updated confirmation canceled", confirmations)
-            if len(snapshots) < 3:
-                return ExecutionResult(False, False, "final refresh unavailable", confirmations)
-            final = snapshots[2]
-            if final != refreshed:
-                return ExecutionResult(False, False, "changed again before send", confirmations)
-            selected = final
-        else:
-            selected = refreshed
+        selected = snapshots[1]
 
     gate.in_flight = True
     gate.last_submit_ms = now_ms

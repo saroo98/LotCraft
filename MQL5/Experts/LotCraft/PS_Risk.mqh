@@ -548,19 +548,23 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
       return(false);
      }
 
-   calc.volume_capped=(calc.raw_volume>volume_cap+market.volume_step*1.0e-9);
-   calc.volume=PS_FloorVolume(calc.raw_volume,market.volume_min,volume_cap,market.volume_step);
+   double volume_epsilon=market.volume_step*1.0e-9;
+   calc.volume_capped=(calc.raw_volume>volume_cap+volume_epsilon);
+   calc.volume_raised_to_minimum=(calc.raw_volume+volume_epsilon<market.volume_min);
+   if(calc.volume_raised_to_minimum)
+      calc.volume=NormalizeDouble(market.volume_min,PS_DecimalsForStep(market.volume_step));
+   else
+      calc.volume=PS_FloorVolume(calc.raw_volume,market.volume_min,volume_cap,market.volume_step);
    if(calc.volume<=0.0)
      {
-      calc.error=StringFormat("Requested risk produces less than the broker minimum volume of %s lots.",
-                              DoubleToString(market.volume_min,PS_DecimalsForStep(market.volume_step)));
+      calc.error="A broker-valid volume could not be calculated.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
      }
 
    calc.actual_money=calc.one_lot_loss*calc.volume;
    double risk_tolerance=MathMax(1.0e-9,MathAbs(calc.requested_money)*1.0e-12);
-   if(calc.actual_money>calc.requested_money+risk_tolerance)
+   if(!calc.volume_raised_to_minimum && calc.actual_money>calc.requested_money+risk_tolerance)
      {
       double reduced=PS_FloorVolume(calc.volume-market.volume_step,market.volume_min,volume_cap,market.volume_step);
       if(reduced<=0.0)
@@ -579,7 +583,10 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
         }
      }
    calc.actual_percent=calc.actual_money/calc.account_basis*100.0;
-   if(calc.volume_capped)
+   if(calc.volume_raised_to_minimum)
+      calc.notice=StringFormat("The requested risk is below the broker minimum. Size was raised to %s lots; the actual risk is shown in parentheses.",
+                               DoubleToString(calc.volume,PS_DecimalsForStep(market.volume_step)));
+   else if(calc.volume_capped)
       calc.notice="Position size was capped downward by broker maximum or aggregate directional volume limit.";
 
    calc.valid=true;

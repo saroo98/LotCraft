@@ -160,12 +160,16 @@ def test_volume_is_floor_normalized_and_postcondition_checked():
     assert "could not be proven within requested risk" in risk
 
 
-def test_persistence_contains_only_allowed_configuration_not_prices():
+def test_persistence_contains_configuration_and_symbol_scoped_planning_state():
     persistence = (SRC / "PS_Persistence.mqh").read_text(encoding="utf-8")
-    for allowed in ["acct", "manual", "riska", "riskp", "riskm", "commt", "commv", "confirm", "mini", "lines"]:
+    for allowed in [
+        "acct", "manual", "riska", "riskp", "riskm", "commt", "commv",
+        "confirm", "mini", "lines", "plansym", "direction", "ordermode",
+        "entry", "stop", "take",
+    ]:
         assert f'"{allowed}"' in persistence
-    for forbidden in ["entry", "stop_loss", "take_profit", '"entry"', '"stop"', '"take"']:
-        assert forbidden not in persistence
+    assert "same_planning_symbol" in persistence
+    assert persistence.index("if(same_planning_symbol)") < persistence.index('PS_PersistenceKey(base,"entry")', persistence.index("if(same_planning_symbol)"))
     assert "PS_STATE_NAMESPACE" in persistence
 
 
@@ -286,6 +290,17 @@ def test_symbol_change_reanchors_pending_and_instant_planning_levels_to_new_char
     assert "visible_max>visible_min" in reanchor
     assert "model.order_mode" not in reanchor
     assert "Position" not in reanchor and "Order" not in reanchor
+
+
+def test_timeframe_reinitialization_restores_same_symbol_planning_state_only():
+    persistence = (SRC / "PS_Persistence.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    for key in ['"plansym"', '"direction"', '"ordermode"', '"entry"', '"stop"', '"take"']:
+        assert key in persistence
+    assert "PS_HashString32(market.symbol)" in persistence
+    assert "same_planning_symbol" in persistence
+    assert "PS_PersistenceSave(g_persistence_base,g_market,g_model);" in main
+    assert "PS_PersistenceLoad(g_persistence_base,g_market,g_model);" in main
 
 
 def test_pointer_guard_preserves_and_restores_chart_properties():
@@ -659,14 +674,38 @@ def test_confirmation_toggle_has_no_refresh_side_effect_assignment():
     assert "ask_confirmation" not in timer
 
 
-def test_trade_and_sl_confirmations_are_complete_and_revalidated():
+def test_trade_confirmation_is_single_stage_and_refreshed_before_send():
     trade = (SRC / "PS_Trade.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
     for field in ["Symbol:", "Direction:", "Order:", "Entry:", "Stop-loss:", "Take-profit:", "Volume:", "Requested risk:", "Actual risk:", "Account basis:", "Commission:"]:
         assert field in trade
-    assert "PS_TradeSnapshotsMateriallyEqual" in main
+    assert main.count("PS_PRODUCT_NAME+\" \"+PS_VERSION_TEXT+\" confirmation\"") == 1
+    assert "updated confirmation" not in main
+    assert "PS_CopyTradeSnapshot(confirmed,refreshed);" in main
+
+
+def test_sl_confirmations_are_complete_and_revalidated():
+    trade = (SRC / "PS_Trade.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    for field in ["Symbol:", "Direction:", "Order:", "Entry:", "Stop-loss:", "Take-profit:", "Volume:", "Requested risk:", "Actual risk:", "Account basis:", "Commission:"]:
+        assert field in trade
     assert "PS_TradeSlTargetSetsEqual" in main
-    assert "changed again before send" in main
+
+
+def test_instant_entry_handle_drag_switches_to_pending_and_remains_movable():
+    main = MAIN.read_text(encoding="utf-8")
+    update = re.search(r"bool PS_UpdateLevelFromPointer.*?\n  \}", main, re.S).group(0)
+    move = re.search(r"void PS_MouseMoveCaptured.*?\n  \}", main, re.S).group(0)
+    assert "PS_ModelChangeOrderMode(g_model,g_market,PS_ORDER_PENDING);" in update
+    assert "Entry handle is market-bound" not in update
+    assert "Entry handle is market-bound" not in move
+
+
+def test_risk_money_field_shows_actual_risk_in_parentheses_when_different():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    display = re.search(r"string PS_UIRiskMoneyDisplay.*?\n  \}", ui, re.S).group(0)
+    assert 'return(requested+" ("+actual+")");' in display
+    assert ui.count("PS_UIRiskMoneyDisplay(model,calc,market,editor)") >= 3
 
 
 def test_move_sl_scope_is_all_valid_current_symbol_targets_at_exact_line():

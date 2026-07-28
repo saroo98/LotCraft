@@ -175,10 +175,13 @@ def test_minimum_volume_exactly_allowed():
     assert result.volume == 0.01
 
 
-def test_requested_volume_below_minimum_is_rejected():
+def test_requested_volume_below_minimum_is_raised_and_actual_risk_is_reported():
     result = calculate(Model(risk_authority=RiskAuthority.MONEY, requested_risk_money=0.99), Market(one_lot_price_loss=100))
-    assert not result.valid
-    assert "below minimum" in result.error
+    assert result.valid
+    assert result.volume == 0.01
+    assert result.volume_raised_to_minimum
+    assert result.actual_money == 1.0
+    assert result.actual_money > result.requested_money
 
 
 def test_requested_volume_above_maximum_is_capped_downward():
@@ -273,14 +276,19 @@ def test_downward_rounding_proves_actual_risk_not_above_requested_randomized():
             assert volume >= minimum - step * 1e-8
 
 
-def test_actual_risk_never_exceeds_requested_due_to_volume_rounding_matrix():
+def test_actual_risk_only_exceeds_requested_for_explicit_broker_minimum_override():
     for loss in [0.01, 0.1, 1, 7.13, 100, 1234.56]:
         for requested_money in [1, 10, 99.99, 100, 1000, 9999]:
             for step in [0.001, 0.01, 0.1, 1.0]:
                 market = Market(volume_min=step, volume_step=step, volume_max=10_000, one_lot_price_loss=loss)
                 result = calculate(Model(risk_authority=RiskAuthority.MONEY, requested_risk_money=requested_money), market)
                 if result.valid:
-                    assert result.actual_money <= result.requested_money + max(1e-9, requested_money * 1e-12)
+                    tolerance = max(1e-9, requested_money * 1e-12)
+                    if result.volume_raised_to_minimum:
+                        assert result.volume == market.volume_min
+                        assert result.actual_money > result.requested_money + tolerance
+                    else:
+                        assert result.actual_money <= result.requested_money + tolerance
 
 
 def test_manual_account_value_must_be_positive_and_finite():

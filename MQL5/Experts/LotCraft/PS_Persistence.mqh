@@ -22,7 +22,7 @@ bool PS_PersistenceRead(const string key,double &value)
    return(PS_IsFinite(value));
   }
 
-void PS_PersistenceSave(const string base,const PSModel &model)
+void PS_PersistenceSave(const string base,const PSMarketSnapshot &market,const PSModel &model)
   {
    GlobalVariableSet(PS_PersistenceKey(base,"acct"),(double)model.account_mode);
    GlobalVariableSet(PS_PersistenceKey(base,"manual"),model.manual_account_money);
@@ -38,9 +38,18 @@ void PS_PersistenceSave(const string base,const PSModel &model)
    // the same chart safely after a rollback.
    GlobalVariableSet(PS_PersistenceKey(base,"mini"),(model.view_mode==PS_VIEW_MINI ? 1.0 : 0.0));
    GlobalVariableSet(PS_PersistenceKey(base,"lines"),(model.lines_visible ? 1.0 : 0.0));
+   if(market.symbol!="")
+     {
+      GlobalVariableSet(PS_PersistenceKey(base,"plansym"),(double)PS_HashString32(market.symbol));
+      GlobalVariableSet(PS_PersistenceKey(base,"direction"),(double)model.direction);
+      GlobalVariableSet(PS_PersistenceKey(base,"ordermode"),(double)model.order_mode);
+      GlobalVariableSet(PS_PersistenceKey(base,"entry"),model.entry);
+      GlobalVariableSet(PS_PersistenceKey(base,"stop"),model.stop_loss);
+      GlobalVariableSet(PS_PersistenceKey(base,"take"),model.take_profit);
+     }
   }
 
-void PS_PersistenceLoad(const string base,PSModel &model)
+void PS_PersistenceLoad(const string base,const PSMarketSnapshot &market,PSModel &model)
   {
    double value=0.0;
    if(PS_PersistenceRead(PS_PersistenceKey(base,"acct"),value))
@@ -80,6 +89,33 @@ void PS_PersistenceLoad(const string base,PSModel &model)
       if(theme==PS_THEME_DARK || theme==PS_THEME_LIGHT) model.theme_mode=(PSThemeMode)theme;
      }
    if(PS_PersistenceRead(PS_PersistenceKey(base,"lines"),value)) model.lines_visible=(value>=0.5);
+
+   double persisted_symbol=0.0;
+   bool same_planning_symbol=
+      (market.symbol!="" &&
+       PS_PersistenceRead(PS_PersistenceKey(base,"plansym"),persisted_symbol) &&
+       (uint)persisted_symbol==PS_HashString32(market.symbol));
+   if(same_planning_symbol)
+     {
+      if(PS_PersistenceRead(PS_PersistenceKey(base,"direction"),value))
+        {
+         int direction=(int)value;
+         if(direction==PS_DIRECTION_LONG || direction==PS_DIRECTION_SHORT)
+            model.direction=(PSDirection)direction;
+        }
+      if(PS_PersistenceRead(PS_PersistenceKey(base,"ordermode"),value))
+        {
+         int order_mode=(int)value;
+         if(order_mode==PS_ORDER_INSTANT || order_mode==PS_ORDER_PENDING)
+            model.order_mode=(PSOrderMode)order_mode;
+        }
+      if(PS_PersistenceRead(PS_PersistenceKey(base,"entry"),value) && PS_IsPositiveFinite(value))
+         model.entry=value;
+      if(PS_PersistenceRead(PS_PersistenceKey(base,"stop"),value) && PS_IsPositiveFinite(value))
+         model.stop_loss=value;
+      if(PS_PersistenceRead(PS_PersistenceKey(base,"take"),value) && PS_IsFinite(value) && value>=0.0)
+         model.take_profit=value;
+     }
    model.revision++;
   }
 

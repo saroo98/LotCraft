@@ -1,8 +1,8 @@
 #property strict
 #property copyright "LotCraft"
 #property link      ""
-#property version   "1.00"
-#property description "LotCraft 1.0.0"
+#property version   "1.10"
+#property description "LotCraft 1.1.0"
 #property description "Discretionary position sizing and explicit MT5 order entry assistant."
 
 #include "PS_Platform.mqh"
@@ -31,6 +31,8 @@ int    g_last_editor_click_y=0;
 ulong  g_copy_feedback_until_ms=0;
 ulong  g_last_chart_mouse_event_ms=0;
 string g_active_symbol="";
+string g_transition_target_symbol="";
+bool   g_symbol_transition_pending=false;
 bool   g_pointer_motion_pending=false;
 int    g_pointer_motion_x=0;
 int    g_pointer_motion_y=0;
@@ -62,7 +64,31 @@ void PS_ClearTransientStatus()
 
 void PS_SaveState()
   {
-   if(g_persistence_base!="") PS_PersistenceSave(g_persistence_base,g_market,g_model);
+   if(g_persistence_base!="" && !g_symbol_transition_pending)
+      PS_PersistenceSave(g_persistence_base,g_market,g_model);
+  }
+
+bool PS_BuildFreshPlan(string &error)
+  {
+   double visible_min=ChartGetDouble(ChartID(),CHART_PRICE_MIN,0);
+   double visible_max=ChartGetDouble(ChartID(),CHART_PRICE_MAX,0);
+   int chart_height=(int)ChartGetInteger(ChartID(),CHART_HEIGHT_IN_PIXELS,0);
+   return(PS_ModelBuildFreshSymbolPlan(g_model,g_market,visible_min,visible_max,
+                                       chart_height,error));
+  }
+
+void PS_AbortInteractionForContextChange()
+  {
+   PS_EditorReset(g_editor);
+   g_pointer.capture=PS_CAPTURE_NONE;
+   g_pointer.control=PS_CTRL_NONE;
+   g_pointer.drag_started=false;
+   g_pointer.editor_double_click=false;
+   g_pointer.native_pointer_calibrated=false;
+   g_pointer.stepper_active=false;
+   g_pointer.stepper_pointer_inside=false;
+   g_pointer_motion_pending=false;
+   PS_UIGuardExit(g_ui);
   }
 
 void PS_Recalculate(const bool clear_status=false)
@@ -80,27 +106,60 @@ void PS_RefreshMarket(const bool clear_status=false)
    string previous_symbol=g_active_symbol;
    PSMarketSnapshot refreshed;
    PS_MarketAcquire(refreshed);
-   PS_CopyMarketSnapshot(g_market,refreshed);
    bool symbol_changed=(previous_symbol!="" && refreshed.symbol!="" &&
                         refreshed.symbol!=previous_symbol);
    if(symbol_changed)
      {
-      PS_EditorReset(g_editor);
-      double visible_min=ChartGetDouble(ChartID(),CHART_PRICE_MIN,0);
-      double visible_max=ChartGetDouble(ChartID(),CHART_PRICE_MAX,0);
-      PS_ModelReanchorForSymbol(g_model,g_market,visible_min,visible_max);
-      PS_SetStatus("Entry and planning levels were fitted to "+refreshed.symbol+".",false,3000);
+      if(!g_symbol_transition_pending) PS_SaveState();
+      PS_AbortInteractionForContextChange();
+      PS_CopyMarketSnapshot(g_market,refreshed);
+      g_transition_target_symbol=refreshed.symbol;
+      string transition_error="";
+      if(PS_BuildFreshPlan(transition_error))
+        {
+         g_symbol_transition_pending=false;
+         g_transition_target_symbol="";
+         g_active_symbol=refreshed.symbol;
+         PS_SetStatus("Entry and planning levels were fitted to "+refreshed.symbol+".",false,3000);
+        }
+      else
+        {
+         g_symbol_transition_pending=true;
+         PS_UIHidePanelContent(g_ui);
+         PS_UIHidePlanningLines(g_ui);
+         PS_LogWarningRateLimited("symbol-transition.wait",transition_error,5000);
+         g_last_market_refresh_ms=GetTickCount64();
+         return;
+        }
      }
    else
-      PS_ModelEnsureInitialPrices(g_model,g_market);
-   g_active_symbol=refreshed.symbol;
+     {
+      PS_CopyMarketSnapshot(g_market,refreshed);
+      if(g_symbol_transition_pending && refreshed.symbol==g_transition_target_symbol)
+        {
+         string transition_error="";
+         if(!PS_BuildFreshPlan(transition_error))
+           {
+            PS_UIHidePanelContent(g_ui);
+            PS_UIHidePlanningLines(g_ui);
+            PS_LogWarningRateLimited("symbol-transition.wait",transition_error,5000);
+            g_last_market_refresh_ms=GetTickCount64();
+            return;
+           }
+         g_symbol_transition_pending=false;
+         g_transition_target_symbol="";
+         g_active_symbol=refreshed.symbol;
+        }
+      else PS_ModelEnsureInitialPrices(g_model,g_market);
+     }
+   if(g_active_symbol=="") g_active_symbol=refreshed.symbol;
    g_last_market_refresh_ms=GetTickCount64();
    PS_Recalculate(clear_status);
   }
 
 void PS_RenderIfDirty()
   {
-   if(!g_initialized || !g_ui.created) return;
+   if(!g_initialized || !g_ui.created || g_symbol_transition_pending) return;
    if(g_pointer.capture==PS_CAPTURE_PANEL) return;
    bool drag_capture=(g_pointer.capture==PS_CAPTURE_HANDLE_ENTRY ||
                       g_pointer.capture==PS_CAPTURE_HANDLE_STOP ||
@@ -447,11 +506,20 @@ void PS_Action(const PSControlId control)
          PS_Recalculate(false);
          break;
       case PS_CTRL_ORDER_MODE:
-         PS_ModelChangeOrderMode(g_model,g_market,
-                                 (g_model.order_mode==PS_ORDER_INSTANT ? PS_ORDER_PENDING : PS_ORDER_INSTANT));
+        {
+         if(!PS_CommitEditor()) break;
+         string error="";
+         PSOrderMode requested=(g_model.order_mode==PS_ORDER_INSTANT ? PS_ORDER_PENDING : PS_ORDER_INSTANT);
+         if(!PS_ModelChangeOrderMode(g_model,g_market,requested,error))
+           {
+            PS_SetStatus(error,true,7000);
+            break;
+           }
          PS_ClearTransientStatus();
+         PS_SaveState();
          PS_Recalculate(false);
          break;
+        }
       case PS_CTRL_LINES:
          g_model.lines_visible=!g_model.lines_visible;
          PS_SaveState();
@@ -514,7 +582,14 @@ bool PS_UpdateLevelFromPointer(const PSCaptureMode capture,const int x,const int
    if(capture==PS_CAPTURE_HANDLE_ENTRY)
      {
        if(g_model.order_mode==PS_ORDER_INSTANT)
-          PS_ModelChangeOrderMode(g_model,g_market,PS_ORDER_PENDING);
+         {
+          string mode_error="";
+          if(!PS_ModelChangeOrderMode(g_model,g_market,PS_ORDER_PENDING,mode_error))
+            {
+             PS_SetStatus(mode_error,true,7000);
+             return(false);
+            }
+         }
        previous=g_model.entry;
        g_model.entry=price;
      }
@@ -922,7 +997,7 @@ int OnInit()
   {
    if(!MQLInfoInteger(MQL_DLLS_ALLOWED))
      {
-      string message="LotCraft 1.0.0 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
+      string message="LotCraft 1.1.0 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
       PS_LogError(message);
       MessageBox(message,PS_PRODUCT_NAME+" initialization",MB_OK|MB_ICONERROR);
       return(INIT_FAILED);
@@ -935,15 +1010,30 @@ int OnInit()
    g_pointer.control=PS_CTRL_NONE;
 
    PS_MarketAcquire(g_market);
-   g_active_symbol=g_market.symbol;
    PS_ModelInitialize(g_model,g_market);
-   PS_ModelEnsureInitialPrices(g_model,g_market);
    g_persistence_base=PS_PersistenceBase(g_market);
-   PS_PersistenceLoad(g_persistence_base,g_market,g_model);
+   bool same_symbol_plan_loaded=PS_PersistenceLoad(g_persistence_base,g_market,g_model);
    // Commission controls are intentionally absent from the compact panel.
    // Do not let a previously persisted hidden value affect position sizing.
    g_model.commission_mode=PS_COMMISSION_ROUND_TRIP;
    g_model.commission_per_lot=0.0;
+
+   bool coherent_plan=(same_symbol_plan_loaded &&
+                       PS_ModelStoredPlanStructurallyValid(g_model,g_market));
+   if(coherent_plan && g_model.order_mode==PS_ORDER_INSTANT)
+      PS_ModelSyncInstantEntry(g_model,g_market,false);
+   if(!coherent_plan)
+     {
+      string transition_error="";
+      coherent_plan=PS_BuildFreshPlan(transition_error);
+      if(!coherent_plan)
+        {
+         g_symbol_transition_pending=true;
+         g_transition_target_symbol=g_market.symbol;
+         PS_LogWarningRateLimited("symbol-transition.init",transition_error,5000);
+        }
+     }
+   if(coherent_plan) g_active_symbol=g_market.symbol;
 
    uint instance_hash=PS_HashString32(g_market.account_server+"|"+IntegerToString(g_market.account_login)+"|"+IntegerToString(ChartID()));
    g_ui.prefix=StringFormat("%s.%08X.",PS_OBJECT_NAMESPACE,instance_hash);
@@ -962,11 +1052,19 @@ int OnInit()
       return(INIT_FAILED);
      }
 
-   PS_Recalculate(false);
    g_initialized=true;
    g_update_check_launched=(bool)MQLInfoInteger(MQL_TESTER);
    g_update_check_start_ms=GetTickCount64();
-   PS_RenderIfDirty();
+   if(g_symbol_transition_pending)
+     {
+      PS_UIHidePanelContent(g_ui);
+      PS_UIHidePlanningLines(g_ui);
+     }
+   else
+     {
+      PS_Recalculate(false);
+      PS_RenderIfDirty();
+     }
    PS_LogInfo(StringFormat("%s %s initialized on %s chart %I64d.",PS_PRODUCT_NAME,PS_VERSION_TEXT,_Symbol,ChartID()));
    return(INIT_SUCCEEDED);
   }

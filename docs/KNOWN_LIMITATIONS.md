@@ -1,4 +1,4 @@
-# LotCraft 1.0.0 Known Limitations
+# LotCraft 1.1.0 Known Limitations
 
 Only limitations verified from the delivered source or build environment are listed.
 

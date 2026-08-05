@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="MetaTrader 5" src="https://img.shields.io/badge/MetaTrader-5-1684d5?style=flat-square">
   <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078d4?style=flat-square">
-  <img alt="Version 1.0.0" src="https://img.shields.io/badge/version-1.0.0-2fbd72?style=flat-square">
+  <img alt="Version 1.1.0" src="https://img.shields.io/badge/version-1.1.0-2fbd72?style=flat-square">
   <a href="https://github.com/saroo98/LotCraft/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/download-latest%20release-2fbd72?style=flat-square"></a>
 </p>
 
@@ -39,18 +39,18 @@ It does **not** generate signals or place autonomous trades. A new order begins 
 
 Open the [latest GitHub Release](https://github.com/saroo98/LotCraft/releases/latest) and download:
 
-`LotCraft-1.0.0-Setup.exe`
+`LotCraft-1.1.0-Setup.exe`
 
 The installer is self-contained. You do not need to download or copy a separate `.ex5` file.
 
 ### 2. Run the installer
 
 1. Close MetaTrader 5, or leave it open and refresh Navigator after installation.
-2. Double-click `LotCraft-1.0.0-Setup.exe`.
+2. Double-click `LotCraft-1.1.0-Setup.exe`.
 3. Approve the MT5 terminal data directory detected by the installer.
 4. Wait for the success message.
 
-If Windows SmartScreen appears because the community build is not code-signed, select **More info**, verify that the filename is `LotCraft-1.0.0-Setup.exe`, and then choose **Run anyway** only if you downloaded it from this repository.
+If Windows SmartScreen appears because the community build is not code-signed, select **More info**, verify that the filename is `LotCraft-1.1.0-Setup.exe`, and then choose **Run anyway** only if you downloaded it from this repository.
 
 ### 3. Attach LotCraft
 

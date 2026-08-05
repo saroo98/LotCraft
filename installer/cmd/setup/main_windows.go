@@ -28,8 +28,8 @@ var embeddedEX5 []byte
 
 const (
 	productName       = "LotCraft"
-	productVersion    = "1.0.0"
-	setupTitle        = "LotCraft 1.0.0 Setup"
+	productVersion    = "1.1.0"
+	setupTitle        = "LotCraft 1.1.0 Setup"
 	ex5Name           = "LotCraft.ex5"
 	updaterName       = "LotCraft-Updater.exe"
 	uninstallName     = "LotCraft-Uninstall.exe"
@@ -152,7 +152,7 @@ func main() {
 	}
 	logPath := opt.logPath
 	if logPath == "" {
-		logPath = filepath.Join(os.TempDir(), "LotCraft-1.0.0-install.log")
+		logPath = filepath.Join(os.TempDir(), "LotCraft-1.1.0-install.log")
 	}
 	log, err := newLogger(logPath, opt.quiet)
 	if err != nil {
@@ -429,7 +429,7 @@ func runInstall(opt options, log *logger) error {
 	log.printf("hash canonical_ex5=%s staged_ex5=%s installed_ex5=%s installer=%s updater=%s", canonicalHash, stagedHash, installedHash, installerHash, updaterHash)
 	if !opt.quiet {
 		showMessage(setupTitle,
-			"LotCraft 1.0.0 was installed successfully.\n\nFinal destination:\n"+installedResolved+"\n\nSHA-256:\n"+installedHash+"\n\nRestart MetaTrader 5 or refresh the Navigator before attaching the EA.",
+			"LotCraft 1.1.0 was installed successfully.\n\nFinal destination:\n"+installedResolved+"\n\nSHA-256:\n"+installedHash+"\n\nRestart MetaTrader 5 or refresh the Navigator before attaching the EA.",
 			mbOK|mbIconInformation|mbSetForeground)
 	}
 	return nil
@@ -541,7 +541,7 @@ func runUninstall(opt options, log *logger) error {
 	}
 
 	if !opt.quiet {
-		message := "Remove LotCraft 1.0.0 from:\n" + currentProductResolved + "\n\nOnly the four installer-owned files will be removed. Unrelated files will be preserved."
+		message := "Remove LotCraft 1.1.0 from:\n" + currentProductResolved + "\n\nOnly the four installer-owned files will be removed. Unrelated files will be preserved."
 		if showMessage(setupTitle, message, mbYesNo|mbIconQuestion|mbSetForeground) != idYes {
 			return errors.New("uninstall cancelled")
 		}
@@ -585,7 +585,7 @@ func runUninstall(opt options, log *logger) error {
 
 	log.printf("uninstall complete product_dir=%s", currentProductResolved)
 	if !opt.quiet {
-		showMessage(setupTitle, "LotCraft 1.0.0 owned files were removed.\n\nDirectory checked:\n"+currentProductResolved+"\n\nAny unrelated files in that directory were preserved.", mbOK|mbIconInformation|mbSetForeground)
+		showMessage(setupTitle, "LotCraft 1.1.0 owned files were removed.\n\nDirectory checked:\n"+currentProductResolved+"\n\nAny unrelated files in that directory were preserved.", mbOK|mbIconInformation|mbSetForeground)
 	}
 	return nil
 }

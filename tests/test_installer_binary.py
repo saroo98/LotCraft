@@ -6,7 +6,7 @@ import struct
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = ROOT / "build" / "LotCraft-1.0.0-Setup.exe"
+BINARY = ROOT / "build" / "LotCraft-1.1.0-Setup.exe"
 SCRIPT = ROOT / "scripts" / "stamp_pe_version.py"
 spec = importlib.util.spec_from_file_location("stamp_pe_version", SCRIPT)
 assert spec and spec.loader
@@ -19,7 +19,7 @@ def binary_bytes() -> bytearray:
     return bytearray(BINARY.read_bytes())
 
 
-def test_installer_is_x64_windows_gui_pe_with_version_1_0():
+def test_installer_is_x64_windows_gui_pe_with_version_1_1():
     raw = binary_bytes()
     pe_offset = struct.unpack_from("<I", raw, 0x3C)[0]
     coff = pe_offset + 4
@@ -40,7 +40,7 @@ def test_installer_has_valid_resource_directory_and_version_strings():
     assert resource_rva == resource["virtual_address"]
     assert resource_size > 0
     payload = bytes(raw[int(resource["raw_pointer"]) : int(resource["raw_pointer"]) + int(resource["raw_size"])])
-    for text in ["LotCraft", "LotCraft 1.0.0 Installer", "1.0.0.0"]:
+    for text in ["LotCraft", "LotCraft 1.1.0 Installer", "1.1.0.0"]:
         assert stamp_pe_version.utf16z(text) in payload
 
 

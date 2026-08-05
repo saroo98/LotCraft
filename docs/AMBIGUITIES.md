@@ -1,4 +1,4 @@
-# LotCraft 1.0.0 Safety-Critical Ambiguity Record
+# LotCraft 1.1.0 Safety-Critical Ambiguity Record
 
 The resolutions below were selected without adding controls or strategy behavior.
 

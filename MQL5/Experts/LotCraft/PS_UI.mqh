@@ -477,10 +477,14 @@ bool PS_UIEnsureHandleCanvas(const PSUIState &ui,const PSLevelId level,
       ObjectSetInteger(ChartID(),name,OBJPROP_SELECTED,false);
       ObjectSetInteger(ChartID(),name,OBJPROP_HIDDEN,true);
       ObjectSetInteger(ChartID(),name,OBJPROP_BACK,false);
-      ObjectSetInteger(ChartID(),name,OBJPROP_ZORDER,50000);
       ObjectSetString(ChartID(),name,OBJPROP_TOOLTIP,"\n");
       repaint=true;
      }
+
+   // Match chart-object click ownership to the custom hit-test contract.
+   // Stop owns overlapping pixels, Entry is next, and Take-profit is lowest.
+   long zorder=(level==PS_LEVEL_STOP ? 50020 : (level==PS_LEVEL_ENTRY ? 50010 : 50000));
+   ObjectSetInteger(ChartID(),name,OBJPROP_ZORDER,zorder);
 
    if(g_ps_handle_canvas_color[index]!=background || g_ps_handle_canvas_text[index]!=text)
       repaint=true;
@@ -577,8 +581,11 @@ void PS_UIUpdateLines(PSUIState &ui,const PSModel &model,const PSMarketSnapshot 
    colors[1]=stop_color;
    colors[2]=take_color;
 
-   for(int i=0;i<3;i++)
+   // Deterministic paint order: Take-profit, Entry, then Stop on top.
+   int paint_order[3]={2,0,1};
+   for(int paint_index=0;paint_index<3;paint_index++)
      {
+      int i=paint_order[paint_index];
       bool viewport=requested[i] && prices[i]>=price_min && prices[i]<=price_max;
       int px=0;
       int py=0;
@@ -594,8 +601,12 @@ void PS_UIUpdateLines(PSUIState &ui,const PSModel &model,const PSMarketSnapshot 
 PSLevelId PS_UIHitHandle(const int x,const int y,bool &hit)
   {
    hit=false;
-   for(int i=0;i<3;i++)
+   // Visual overlap does not change Long/Short price inference. It only gives
+   // the protective Stop marker first ownership of shared pointer pixels.
+   int hit_priority[3]={1,0,2};
+   for(int priority=0;priority<3;priority++)
      {
+      int i=hit_priority[priority];
       if(g_ps_handle_visible[i] && PS_RectContains(g_ps_handle_rects[i],x,y))
         {
          hit=true;
@@ -603,6 +614,18 @@ PSLevelId PS_UIHitHandle(const int x,const int y,bool &hit)
         }
      }
    return(PS_LEVEL_ENTRY);
+  }
+
+void PS_UIHidePlanningLines(PSUIState &ui)
+  {
+   PS_UISetLine(ui,"line.entry",0.0,false,PS_CLR_ACCENT,STYLE_SOLID);
+   PS_UISetLine(ui,"line.stop",0.0,false,PS_CLR_SHORT,STYLE_DASH);
+   PS_UISetLine(ui,"line.take",0.0,false,PS_CLR_LONG,STYLE_DASH);
+   PS_UISetHandle(ui,PS_LEVEL_TAKE,0,0,"T",PS_CLR_LONG,false);
+   PS_UISetHandle(ui,PS_LEVEL_ENTRY,0,0,"E",PS_CLR_ACCENT,false);
+   PS_UISetHandle(ui,PS_LEVEL_STOP,0,0,"S",PS_CLR_SHORT,false);
+   ui.line_dirty=false;
+   ChartRedraw(ChartID());
   }
 
 bool PS_UIHasOwnedPrefix(const PSUIState &ui)

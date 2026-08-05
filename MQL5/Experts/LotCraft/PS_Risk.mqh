@@ -3,6 +3,89 @@
 
 #include "PS_Market.mqh"
 
+bool PS_ModelBuildFreshSymbolPlan(PSModel &model,const PSMarketSnapshot &market,
+                                  const double visible_min,const double visible_max,
+                                  const int chart_height,string &error);
+bool PS_ModelChangeOrderMode(PSModel &model,const PSMarketSnapshot &market,
+                             const PSOrderMode new_mode,string &error);
+
+double PS_ModelDefaultLevelDistance(const double reference,const PSMarketSnapshot &market)
+  {
+   if(!PS_IsPositiveFinite(reference) || !PS_IsPositiveFinite(market.tick_size)) return(0.0);
+   double broker_minimum=PS_MarketProtectiveDistance(market,true)+market.tick_size;
+   double tick_minimum=100.0*market.tick_size;
+   double price_relative=reference*0.002;
+   return(MathMax(broker_minimum,MathMax(tick_minimum,price_relative)));
+  }
+
+double PS_ModelPendingLegGap(const PSMarketSnapshot &market)
+  {
+   if(!market.tick_valid || !PS_IsPositiveFinite(market.tick_size)) return(0.0);
+   double spread=MathMax(0.0,market.tick.ask-market.tick.bid);
+   return(MathMax(PS_MarketProtectiveDistance(market,true)+4.0*market.tick_size,
+                  MathMax(8.0*market.tick_size,2.0*spread)));
+  }
+
+double PS_ModelRequiredFreshGap(const double reference,const PSMarketSnapshot &market,
+                                const double visible_min,const double visible_max,
+                                const int chart_height,const bool pending)
+  {
+   double gap=PS_ModelDefaultLevelDistance(reference,market);
+   double pending_leg=PS_ModelPendingLegGap(market);
+   gap=MathMax(gap,3.0*pending_leg);
+   bool viewport_valid=(chart_height>0 && PS_IsFinite(visible_min) &&
+                        PS_IsFinite(visible_max) && visible_max>visible_min &&
+                        reference>=visible_min && reference<=visible_max);
+   if(viewport_valid)
+     {
+      double visual=(visible_max-visible_min)*(34.0/(double)chart_height);
+      if(pending) visual/=0.60;
+      gap=MathMax(gap,visual);
+     }
+   return(gap);
+  }
+
+bool PS_ModelPlaceOutward(const double reference,const double required_distance,
+                          const int direction_sign,const PSMarketSnapshot &market,
+                          double &price)
+  {
+   price=0.0;
+   if(!PS_IsPositiveFinite(reference) || !PS_IsPositiveFinite(required_distance) ||
+      !PS_IsPositiveFinite(market.tick_size) || (direction_sign!=-1 && direction_sign!=1))
+      return(false);
+   double ticks=MathMax(1.0,MathCeil(required_distance/market.tick_size-PS_DOUBLE_EPS));
+   for(int attempt=0;attempt<4;attempt++)
+     {
+      double candidate=PS_NormalizePrice(reference+direction_sign*ticks*market.tick_size,market);
+      double actual=direction_sign*(candidate-reference);
+      if(PS_IsPositiveFinite(candidate) && actual>0.0 && actual+PS_DOUBLE_EPS>=required_distance)
+        {
+         price=candidate;
+         return(true);
+        }
+      ticks+=1.0;
+     }
+   return(false);
+  }
+
+bool PS_ModelStoredPlanStructurallyValid(PSModel &model,const PSMarketSnapshot &market)
+  {
+   if(!PS_IsPositiveFinite(market.tick_size) || !PS_IsPositiveFinite(model.entry) ||
+      !PS_IsPositiveFinite(model.stop_loss) || !PS_IsFinite(model.take_profit) ||
+      model.take_profit<0.0) return(false);
+   double entry=PS_NormalizePrice(model.entry,market);
+   double stop=PS_NormalizePrice(model.stop_loss,market);
+   double take=(model.take_profit>0.0 ? PS_NormalizePrice(model.take_profit,market) : 0.0);
+   double tolerance=market.tick_size*0.5;
+   bool sl_valid=(model.direction==PS_DIRECTION_LONG ? stop<entry-tolerance : stop>entry+tolerance);
+   bool tp_valid=(take<=0.0 || (model.direction==PS_DIRECTION_LONG ? take>entry+tolerance : take<entry-tolerance));
+   if(!PS_IsPositiveFinite(entry) || !PS_IsPositiveFinite(stop) || !sl_valid || !tp_valid) return(false);
+   model.entry=entry;
+   model.stop_loss=stop;
+   model.take_profit=take;
+   return(true);
+  }
+
 void PS_ModelInitialize(PSModel &model,const PSMarketSnapshot &market)
   {
    ZeroMemory(model);
@@ -17,7 +100,7 @@ void PS_ModelInitialize(PSModel &model,const PSMarketSnapshot &market)
    model.lines_visible=true;
    model.entry=(market.tick_valid ? PS_NormalizePrice(market.tick.ask,market) : 0.0);
 
-   double distance=MathMax(100.0*market.tick_size,PS_MarketProtectiveDistance(market,true)+market.tick_size);
+   double distance=PS_ModelDefaultLevelDistance(model.entry,market);
    if(market.tick_valid)
       model.stop_loss=PS_NormalizePrice(market.tick.bid-distance,market);
    else
@@ -47,7 +130,7 @@ bool PS_ModelEnsureInitialPrices(PSModel &model,const PSMarketSnapshot &market)
    if(!PS_IsPositiveFinite(model.stop_loss))
      {
       double minimum=PS_MarketProtectiveDistance(market,true);
-      double distance=MathMax(100.0*market.tick_size,minimum+market.tick_size);
+      double distance=PS_ModelDefaultLevelDistance(executable,market);
       double stop=0.0;
       if(model.direction==PS_DIRECTION_LONG)
         {
@@ -70,52 +153,9 @@ bool PS_ModelEnsureInitialPrices(PSModel &model,const PSMarketSnapshot &market)
 bool PS_ModelReanchorForSymbol(PSModel &model,const PSMarketSnapshot &market,
                                const double visible_min,const double visible_max)
   {
-   if(!market.tick_valid || !PS_IsPositiveFinite(market.tick_size)) return(false);
-
-   double entry=(model.direction==PS_DIRECTION_LONG ? market.tick.ask : market.tick.bid);
-   entry=PS_NormalizePrice(entry,market);
-   if(!PS_IsPositiveFinite(entry)) return(false);
-
-   double minimum=MathMax(market.tick_size,
-                          PS_MarketProtectiveDistance(market,true)+market.tick_size);
-   double distance=MathMax(100.0*market.tick_size,entry*0.002);
-   bool viewport_valid=(PS_IsFinite(visible_min) && PS_IsFinite(visible_max) &&
-                        visible_max>visible_min && entry>=visible_min && entry<=visible_max);
-   if(viewport_valid)
-     {
-      double span=visible_max-visible_min;
-      distance=MathMax(minimum,span*0.18);
-      double available=(model.direction==PS_DIRECTION_LONG ? entry-visible_min : visible_max-entry);
-      if(available>minimum*1.25) distance=MathMin(distance,available*0.70);
-     }
-   distance=MathMax(minimum,distance);
-
-   bool had_take_profit=PS_IsPositiveFinite(model.take_profit);
-   double stop=entry+(model.direction==PS_DIRECTION_LONG ? -distance : distance);
-   if(viewport_valid)
-     {
-      double span=visible_max-visible_min;
-      double margin=span*0.06;
-      if(model.direction==PS_DIRECTION_LONG)
-         stop=MathMax(stop,visible_min+margin);
-      else
-         stop=MathMin(stop,visible_max-margin);
-     }
-
-   stop=PS_NormalizePrice(stop,market);
-   if(!PS_IsPositiveFinite(stop) ||
-      (model.direction==PS_DIRECTION_LONG && stop>=entry) ||
-      (model.direction==PS_DIRECTION_SHORT && stop<=entry))
-      stop=PS_NormalizePrice(entry+(model.direction==PS_DIRECTION_LONG ? -minimum : minimum),market);
-
-   model.entry=entry;
-   model.stop_loss=stop;
-   if(had_take_profit)
-      model.take_profit=PS_NormalizePrice(entry+
-                                         (model.direction==PS_DIRECTION_LONG ? distance : -distance),
-                                         market);
-   model.revision++;
-   return(true);
+   string error="";
+   int chart_height=(int)ChartGetInteger(ChartID(),CHART_HEIGHT_IN_PIXELS,0);
+   return(PS_ModelBuildFreshSymbolPlan(model,market,visible_min,visible_max,chart_height,error));
   }
 
 void PS_ModelSyncInstantEntry(PSModel &model,const PSMarketSnapshot &market,const bool entry_editor_active)
@@ -138,7 +178,7 @@ void PS_ModelChangeDirection(PSModel &model,const PSMarketSnapshot &market,const
                     : model.entry;
    double stop_distance=MathAbs(old_entry-model.stop_loss);
    if(!PS_IsPositiveFinite(model.stop_loss) || stop_distance<market.tick_size)
-      stop_distance=MathMax(100.0*market.tick_size,PS_MarketProtectiveDistance(market,true)+market.tick_size);
+      stop_distance=PS_ModelDefaultLevelDistance(old_entry,market);
    bool tp_enabled=PS_IsPositiveFinite(model.take_profit);
    double take_distance=(tp_enabled ? MathAbs(model.take_profit-old_entry) : 0.0);
 
@@ -179,23 +219,6 @@ bool PS_ModelAlignDirectionToStop(PSModel &model,const PSMarketSnapshot &market)
                                          market);
    model.revision++;
    return(true);
-  }
-
-void PS_ModelChangeOrderMode(PSModel &model,const PSMarketSnapshot &market,const PSOrderMode new_mode)
-  {
-   if(model.order_mode==new_mode) return;
-   model.order_mode=new_mode;
-   if(new_mode==PS_ORDER_INSTANT && market.tick_valid)
-     {
-      double old_entry=model.entry;
-      double new_entry=(model.direction==PS_DIRECTION_LONG ? market.tick.ask : market.tick.bid);
-      double delta=new_entry-old_entry;
-      model.entry=PS_NormalizePrice(new_entry,market);
-      model.stop_loss=PS_NormalizePrice(model.stop_loss+delta,market);
-      if(PS_IsPositiveFinite(model.take_profit))
-         model.take_profit=PS_NormalizePrice(model.take_profit+delta,market);
-     }
-   model.revision++;
   }
 
 bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSCalcResult &calc,string &error)
@@ -422,6 +445,214 @@ bool PS_RiskValidateProtectivePrices(const PSModel &model,const PSMarketSnapshot
          return(false);
         }
      }
+   return(true);
+  }
+
+bool PS_ModelValidateCandidate(const PSModel &candidate,const PSMarketSnapshot &market,string &error)
+  {
+   PSCalcResult validation;
+   ZeroMemory(validation);
+   if(!PS_RiskResolveOrder(candidate,market,validation,error)) return(false);
+   return(PS_RiskValidateProtectivePrices(candidate,market,validation,error));
+  }
+
+bool PS_ModelLimitEntry(const double reference,const double stop,const double pending_leg,
+                        const PSDirection direction,const PSMarketSnapshot &market,double &entry)
+  {
+   entry=0.0;
+   double available=MathAbs(reference-stop);
+   if(available+PS_DOUBLE_EPS<2.0*pending_leg || !PS_IsPositiveFinite(market.tick_size)) return(false);
+   double minimum_ticks=MathMax(1.0,MathCeil(pending_leg/market.tick_size-PS_DOUBLE_EPS));
+   double available_ticks=MathFloor(available/market.tick_size+PS_DOUBLE_EPS);
+   double maximum_ticks=available_ticks-minimum_ticks;
+   if(maximum_ticks<minimum_ticks) return(false);
+   double target_ticks=MathCeil(available_ticks*0.40-PS_DOUBLE_EPS);
+   target_ticks=MathMax(minimum_ticks,MathMin(maximum_ticks,target_ticks));
+   int toward_stop=(direction==PS_DIRECTION_LONG ? -1 : 1);
+   entry=PS_NormalizePrice(reference+toward_stop*target_ticks*market.tick_size,market);
+   if(!PS_IsPositiveFinite(entry)) return(false);
+   double quote_leg=(direction==PS_DIRECTION_LONG ? reference-entry : entry-reference);
+   double stop_leg=(direction==PS_DIRECTION_LONG ? entry-stop : stop-entry);
+   return(quote_leg+PS_DOUBLE_EPS>=pending_leg && stop_leg+PS_DOUBLE_EPS>=pending_leg);
+  }
+
+bool PS_ModelStopEntryPreservingSl(const double reference,const double stop,const double pending_leg,
+                                   const PSDirection direction,const PSMarketSnapshot &market,double &entry)
+  {
+   double required=pending_leg;
+   if(direction==PS_DIRECTION_LONG)
+      required=MathMax(required,stop-reference+pending_leg);
+   else
+      required=MathMax(required,reference-stop+pending_leg);
+   int away_from_quote=(direction==PS_DIRECTION_LONG ? 1 : -1);
+   return(PS_ModelPlaceOutward(reference,required,away_from_quote,market,entry));
+  }
+
+bool PS_ModelPrepareTakeProfit(PSModel &candidate,const PSModel &original,
+                               const PSMarketSnapshot &market,const double minimum_distance,
+                               string &error)
+  {
+   error="";
+   if(!PS_IsPositiveFinite(original.take_profit))
+     {
+      candidate.take_profit=0.0;
+      return(true);
+     }
+   double tolerance=market.tick_size*0.5;
+   bool already_valid=(candidate.direction==PS_DIRECTION_LONG
+                       ? original.take_profit>candidate.entry+tolerance &&
+                         original.take_profit-candidate.entry+PS_DOUBLE_EPS>=minimum_distance
+                       : original.take_profit<candidate.entry-tolerance &&
+                         candidate.entry-original.take_profit+PS_DOUBLE_EPS>=minimum_distance);
+   if(already_valid)
+     {
+      candidate.take_profit=original.take_profit;
+      return(true);
+     }
+   double original_distance=MathAbs(original.take_profit-original.entry);
+   double distance=MathMax(original_distance,minimum_distance);
+   int profit_sign=(candidate.direction==PS_DIRECTION_LONG ? 1 : -1);
+   if(!PS_ModelPlaceOutward(candidate.entry,distance,profit_sign,market,candidate.take_profit))
+     {
+      error="A valid take-profit could not be placed on this symbol's price lattice.";
+      return(false);
+     }
+   return(true);
+  }
+
+bool PS_ModelBuildFreshSymbolPlan(PSModel &model,const PSMarketSnapshot &market,
+                                  const double visible_min,const double visible_max,
+                                  const int chart_height,string &error)
+  {
+   error="";
+   if(market.symbol=="" || !market.symbol_ready || !market.tick_valid ||
+      !PS_IsPositiveFinite(market.tick_size) || market.digits<0)
+     {
+      error=(market.error!="" ? market.error : "A synchronized symbol and current quote are required to build a planning setup.");
+      return(false);
+     }
+
+   PSModel candidate;
+   PS_CopyModel(candidate,model);
+   double reference=PS_NormalizePrice(candidate.direction==PS_DIRECTION_LONG
+                                      ? market.tick.ask : market.tick.bid,market);
+   if(!PS_IsPositiveFinite(reference))
+     {
+      error="The current executable price is invalid.";
+      return(false);
+     }
+
+   double gap=PS_ModelRequiredFreshGap(reference,market,visible_min,visible_max,
+                                       chart_height,candidate.order_mode==PS_ORDER_PENDING);
+   int stop_sign=(candidate.direction==PS_DIRECTION_LONG ? -1 : 1);
+   if(!PS_ModelPlaceOutward(reference,gap,stop_sign,market,candidate.stop_loss))
+     {
+      error="A separated stop-loss could not be placed on this symbol's price lattice.";
+      return(false);
+     }
+
+   if(candidate.order_mode==PS_ORDER_INSTANT)
+      candidate.entry=reference;
+   else
+     {
+      double pending_leg=PS_ModelPendingLegGap(market);
+      bool placed=false;
+      if((market.order_mode & SYMBOL_ORDER_LIMIT)==SYMBOL_ORDER_LIMIT)
+         placed=PS_ModelLimitEntry(reference,candidate.stop_loss,pending_leg,
+                                   candidate.direction,market,candidate.entry);
+      if(!placed && (market.order_mode & SYMBOL_ORDER_STOP)==SYMBOL_ORDER_STOP)
+         placed=PS_ModelStopEntryPreservingSl(reference,candidate.stop_loss,pending_leg,
+                                              candidate.direction,market,candidate.entry);
+      if(!placed)
+        {
+         error="The broker does not allow a pending subtype that can satisfy the required Entry and stop-loss distances.";
+         return(false);
+        }
+     }
+
+   if(PS_IsPositiveFinite(model.take_profit))
+     {
+      int profit_sign=(candidate.direction==PS_DIRECTION_LONG ? 1 : -1);
+      if(!PS_ModelPlaceOutward(candidate.entry,gap,profit_sign,market,candidate.take_profit))
+        {
+         error="A fresh take-profit could not be placed on this symbol's price lattice.";
+         return(false);
+        }
+     }
+   else candidate.take_profit=0.0;
+
+   if(!PS_ModelValidateCandidate(candidate,market,error)) return(false);
+   candidate.revision=model.revision+1;
+   if(PS_DIAGNOSTICS>0)
+      PS_LogInfo(StringFormat("Fresh symbol plan committed for %s: direction=%d mode=%d entry=%.*f sl=%.*f tp=%.*f",
+                              market.symbol,(int)candidate.direction,(int)candidate.order_mode,
+                              market.digits,candidate.entry,market.digits,candidate.stop_loss,
+                              market.digits,candidate.take_profit));
+   PS_CopyModel(model,candidate);
+   return(true);
+  }
+
+bool PS_ModelChangeOrderMode(PSModel &model,const PSMarketSnapshot &market,
+                             const PSOrderMode new_mode,string &error)
+  {
+   error="";
+   if(model.order_mode==new_mode) return(true);
+   if(!market.tick_valid || !PS_IsPositiveFinite(market.tick_size))
+     {
+      error=(market.error!="" ? market.error : "A current quote is required to change order mode.");
+      return(false);
+     }
+
+   PSModel candidate;
+   PS_CopyModel(candidate,model);
+   double reference=PS_NormalizePrice(candidate.direction==PS_DIRECTION_LONG
+                                      ? market.tick.ask : market.tick.bid,market);
+   if(!PS_IsPositiveFinite(reference))
+     {
+      error="The current executable price is invalid.";
+      return(false);
+     }
+
+   if(new_mode==PS_ORDER_PENDING)
+     {
+      double pending_leg=PS_ModelPendingLegGap(market);
+      double pending_entry=0.0;
+      bool placed=false;
+      if((market.order_mode & SYMBOL_ORDER_LIMIT)==SYMBOL_ORDER_LIMIT)
+         placed=PS_ModelLimitEntry(reference,candidate.stop_loss,pending_leg,
+                                   candidate.direction,market,pending_entry);
+      if(!placed && (market.order_mode & SYMBOL_ORDER_STOP)==SYMBOL_ORDER_STOP)
+         placed=PS_ModelStopEntryPreservingSl(reference,candidate.stop_loss,pending_leg,
+                                              candidate.direction,market,pending_entry);
+      if(!placed)
+        {
+         error="The broker does not allow a pending subtype that can preserve this stop-loss safely.";
+         return(false);
+        }
+      candidate.order_mode=PS_ORDER_PENDING;
+      candidate.entry=pending_entry;
+      double minimum=PS_MarketProtectiveDistance(market,true)+market.tick_size;
+      if(!PS_ModelPrepareTakeProfit(candidate,model,market,minimum,error)) return(false);
+     }
+   else
+     {
+      double old_entry=candidate.entry;
+      double delta=reference-old_entry;
+      candidate.order_mode=PS_ORDER_INSTANT;
+      candidate.entry=reference;
+      candidate.stop_loss=PS_NormalizePrice(candidate.stop_loss+delta,market);
+      if(PS_IsPositiveFinite(candidate.take_profit))
+         candidate.take_profit=PS_NormalizePrice(candidate.take_profit+delta,market);
+     }
+
+   if(!PS_ModelValidateCandidate(candidate,market,error)) return(false);
+   candidate.revision=model.revision+1;
+   if(PS_DIAGNOSTICS>0)
+      PS_LogInfo(StringFormat("Order-mode transition committed for %s: old=%d new=%d entry=%.*f sl=%.*f tp=%.*f",
+                              market.symbol,(int)model.order_mode,(int)new_mode,
+                              market.digits,candidate.entry,market.digits,candidate.stop_loss,
+                              market.digits,candidate.take_profit));
+   PS_CopyModel(model,candidate);
    return(true);
   }
 

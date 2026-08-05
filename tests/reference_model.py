@@ -69,6 +69,8 @@ class Market:
     account_currency: str = "USD"
     one_lot_price_loss: float = 100.0
     valid: bool = True
+    allow_limit: bool = True
+    allow_stop: bool = True
 
     @property
     def protective_distance(self) -> float:
@@ -90,6 +92,7 @@ class Model:
     requested_risk_percent: float = 1.0
     requested_risk_money: float = 100.0
     commission_per_lot: float = 0.0
+    revision: int = 1
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,173 @@ def normalize_price(price: float, market: Market) -> float:
     # Python round uses bankers' rounding; fixtures avoid half-tick ties.
     steps = math.floor(price / market.tick_size + 0.5)
     return round(steps * market.tick_size, market.digits)
+
+
+def default_level_distance(reference: float, market: Market) -> float:
+    return max(
+        market.protective_distance + market.tick_size,
+        100 * market.tick_size,
+        abs(reference) * 0.002,
+    )
+
+
+def pending_leg_gap(market: Market) -> float:
+    spread = max(0.0, market.ask - market.bid)
+    return max(
+        market.protective_distance + 4 * market.tick_size,
+        8 * market.tick_size,
+        2 * spread,
+    )
+
+
+def outward_price(reference: float, distance: float, sign: int, market: Market) -> float:
+    ticks = max(1, math.ceil(distance / market.tick_size - 1e-12))
+    for _ in range(4):
+        candidate = normalize_price(reference + sign * ticks * market.tick_size, market)
+        if candidate > 0 and sign * (candidate - reference) + 1e-12 >= distance:
+            return candidate
+        ticks += 1
+    raise ValueError("outward price unavailable")
+
+
+def required_fresh_gap(
+    reference: float,
+    market: Market,
+    *,
+    visible_min: float | None = None,
+    visible_max: float | None = None,
+    chart_height: int = 0,
+    pending: bool = False,
+) -> float:
+    gap = max(default_level_distance(reference, market), 3 * pending_leg_gap(market))
+    if (
+        chart_height > 0
+        and visible_min is not None
+        and visible_max is not None
+        and visible_min <= reference <= visible_max
+        and visible_max > visible_min
+    ):
+        visual = (visible_max - visible_min) * 34 / chart_height
+        gap = max(gap, visual / 0.60 if pending else visual)
+    return gap
+
+
+def _limit_entry(reference: float, stop: float, direction: Direction, market: Market) -> float:
+    leg = pending_leg_gap(market)
+    available = abs(reference - stop)
+    minimum_ticks = max(1, math.ceil(leg / market.tick_size - 1e-12))
+    available_ticks = math.floor(available / market.tick_size + 1e-12)
+    maximum_ticks = available_ticks - minimum_ticks
+    if maximum_ticks < minimum_ticks:
+        raise ValueError("limit geometry unavailable")
+    target_ticks = min(maximum_ticks, max(minimum_ticks, math.ceil(available_ticks * 0.40 - 1e-12)))
+    sign = -1 if direction is Direction.LONG else 1
+    entry = normalize_price(reference + sign * target_ticks * market.tick_size, market)
+    quote_leg = reference - entry if direction is Direction.LONG else entry - reference
+    stop_leg = entry - stop if direction is Direction.LONG else stop - entry
+    if quote_leg + 1e-12 < leg or stop_leg + 1e-12 < leg:
+        raise ValueError("limit geometry unavailable")
+    return entry
+
+
+def _stop_entry(reference: float, stop: float, direction: Direction, market: Market) -> float:
+    leg = pending_leg_gap(market)
+    if direction is Direction.LONG:
+        required = max(leg, stop - reference + leg)
+        return outward_price(reference, required, 1, market)
+    required = max(leg, reference - stop + leg)
+    return outward_price(reference, required, -1, market)
+
+
+def build_fresh_symbol_plan(
+    model: Model,
+    market: Market,
+    *,
+    visible_min: float | None = None,
+    visible_max: float | None = None,
+    chart_height: int = 0,
+) -> Model:
+    if not market.valid or market.ask <= 0 or market.bid <= 0 or market.tick_size <= 0:
+        raise ValueError("quote invalid")
+    reference = normalize_price(market.ask if model.direction is Direction.LONG else market.bid, market)
+    gap = required_fresh_gap(
+        reference,
+        market,
+        visible_min=visible_min,
+        visible_max=visible_max,
+        chart_height=chart_height,
+        pending=model.order_mode is OrderMode.PENDING,
+    )
+    stop = outward_price(reference, gap, -1 if model.direction is Direction.LONG else 1, market)
+    if model.order_mode is OrderMode.INSTANT:
+        entry = reference
+    elif market.allow_limit:
+        entry = _limit_entry(reference, stop, model.direction, market)
+    elif market.allow_stop:
+        entry = _stop_entry(reference, stop, model.direction, market)
+    else:
+        raise ValueError("pending subtype unsupported")
+    take = 0.0
+    if model.take_profit > 0:
+        take = outward_price(entry, gap, 1 if model.direction is Direction.LONG else -1, market)
+    candidate = replace(model, entry=entry, stop_loss=stop, take_profit=take, revision=model.revision + 1)
+    order_type, effective_entry = resolve_order(candidate, market)
+    _validate_prices(candidate, market, effective_entry)
+    if model.order_mode is OrderMode.PENDING and order_type not in {
+        OrderType.BUY_LIMIT,
+        OrderType.SELL_LIMIT,
+        OrderType.BUY_STOP,
+        OrderType.SELL_STOP,
+    }:
+        raise AssertionError("fresh pending plan did not resolve as pending")
+    return candidate
+
+
+def change_order_mode(model: Model, market: Market, new_mode: OrderMode) -> Model:
+    if model.order_mode is new_mode:
+        return model
+    reference = normalize_price(market.ask if model.direction is Direction.LONG else market.bid, market)
+    if new_mode is OrderMode.PENDING:
+        if market.allow_limit:
+            try:
+                entry = _limit_entry(reference, model.stop_loss, model.direction, market)
+            except ValueError:
+                if not market.allow_stop:
+                    raise
+                entry = _stop_entry(reference, model.stop_loss, model.direction, market)
+        elif market.allow_stop:
+            entry = _stop_entry(reference, model.stop_loss, model.direction, market)
+        else:
+            raise ValueError("pending subtype unsupported")
+        take = model.take_profit
+        minimum = market.protective_distance + market.tick_size
+        take_valid = take <= 0 or (
+            take - entry >= minimum if model.direction is Direction.LONG else entry - take >= minimum
+        )
+        if not take_valid:
+            distance = max(abs(model.take_profit - model.entry), minimum)
+            take = outward_price(entry, distance, 1 if model.direction is Direction.LONG else -1, market)
+        candidate = replace(
+            model,
+            order_mode=OrderMode.PENDING,
+            entry=entry,
+            stop_loss=model.stop_loss,
+            take_profit=take,
+            revision=model.revision + 1,
+        )
+    else:
+        delta = reference - model.entry
+        candidate = replace(
+            model,
+            order_mode=OrderMode.INSTANT,
+            entry=reference,
+            stop_loss=normalize_price(model.stop_loss + delta, market),
+            take_profit=normalize_price(model.take_profit + delta, market) if model.take_profit > 0 else 0.0,
+            revision=model.revision + 1,
+        )
+    _, effective_entry = resolve_order(candidate, market)
+    _validate_prices(candidate, market, effective_entry)
+    return candidate
 
 
 def floor_volume(requested: float, minimum: float, maximum: float, step: float) -> float:

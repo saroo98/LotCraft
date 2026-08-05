@@ -23,7 +23,7 @@ def run_verifier(
     compile_log.write_text(compile_summary, encoding="utf-16")
     canonical = tmp_path / "canonical" / "LotCraft.ex5"
     staged = tmp_path / "release" / "LotCraft.ex5"
-    installer = tmp_path / "release" / "LotCraft-1.0.0-Setup.exe"
+    installer = tmp_path / "release" / "LotCraft-1.1.0-Setup.exe"
     installed = tmp_path / "terminal" / "MQL5" / "Experts" / "LotCraft" / "LotCraft.ex5"
     for path in [canonical, staged, installer, installed]:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,8 +64,8 @@ def run_verifier(
                 "go", "run", "./cmd/releasesign", "sign",
                 "-private-key", str(private_key),
                 "-installer", str(installer),
-                "-version", "1.0.0",
-                "-tag", "v1.0.0",
+                "-version", "1.1.0",
+                "-tag", "v1.1.0",
                 "-manifest", str(manifest),
                 "-signature", str(signature),
             ],

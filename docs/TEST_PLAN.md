@@ -1,4 +1,4 @@
-# LotCraft 1.0.0 Test Plan
+# LotCraft 1.1.0 Test Plan
 
 ## 1. Test policy
 
@@ -134,3 +134,13 @@ Use minimum practical demo volume or a mocked request gateway. Never use a live 
 - Editing while ticks arrive.
 - Idle run for at least four hours.
 - Review Experts and Journal logs for initialization failures, repeated floods, array errors, zero division, access violations, invalid pointers, object leaks, undeleted objects, and duplicate requests.
+
+## 11. Symbol transition, pending stability, and marker ownership regression
+
+1. On USDJPY M15 select Long and Pending, place a valid separated E/S plan, then replace the chart symbol with USTEC. The first coherent render must remain Long/Pending, contain only USTEC-scaled prices, show separated E/S markers, and calculate a positive size when broker/account constraints permit it.
+2. Repeat the USDJPY-to-USTEC replacement for Short and for Instant. Direction and mode must survive; old numeric prices must never survive.
+3. Change timeframe on one symbol and return. Entry, SL, TP, Direction, and mode must remain the exact same-symbol plan after tick normalization. No reanchor is allowed for timeframe, zoom, or resize alone.
+4. On US30 start with a valid Long Instant plan, record SL, then choose Pending. Pending must become active immediately with the exact prior SL, a deterministic supported subtype, and a positive size. Observe for ten seconds while the quote remains inside half the construction safety buffer; order subtype and validity must not oscillate.
+5. Repeat the Instant-to-Pending test for Short and with Limit disabled/Stop enabled. If neither pending subtype is supported, the previous complete Instant model and calculation must remain unchanged and a capability error must be shown.
+6. Overlap the 36-by-26 E/S hit rectangles while keeping their prices distinct. Press their shared pixels and drag. S must be visually above E and only SL may follow the captured pointer through release.
+7. Repeat the basic checks in Full, Compact, and Mini views and both themes. No layout, editor, stepper, panel-drag, or line-flicker behavior may regress.

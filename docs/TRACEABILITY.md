@@ -1,4 +1,4 @@
-# LotCraft 1.0.0 Requirements-to-Implementation Traceability
+# LotCraft 1.1.0 Requirements-to-Implementation Traceability
 
 Source authority: the supplied **Build Prompt: LotCraft v1.0.0 for MetaTrader 5**.
 
@@ -12,7 +12,7 @@ Status terms:
 
 | ID | Requirement | Implementation | Evidence/status |
 |---|---|---|---|
-| ID-01 | Product, source, compiled name, title, logs, installer, and metadata identify `LotCraft 1.0.0` | `LotCraft.mq5`, `PS_Types.mqh`, UI title, log helpers, installer constants/resources | Implemented, automated identity and PE tests |
+| ID-01 | Product, source, compiled name, title, logs, installer, and metadata identify `LotCraft 1.1.0` | `LotCraft.mq5`, `PS_Types.mqh`, UI title, log helpers, installer constants/resources | Implemented, automated identity and PE tests |
 | ID-02 | Clean implementation independent of old Position Sizer | Dedicated source tree, `LotCraft.v100` objects, `LotCraft.100` state, dedicated installer path | Implemented, automated source/installer scans |
 | ID-03 | Multiple instances do not collide | Prefix hash includes account server/login and chart ID | Implemented; native multi-chart evidence pending |
 
@@ -91,6 +91,11 @@ Status terms:
 | PRICE-01 | Long/Short SL/TP invariants | Central protective-price validation | Implemented, calculation tests |
 | PRICE-02 | Stops/freeze and ambiguous pending rejection | Central broker-distance validation | Implemented, calculation tests; server check pending |
 | PRICE-03 | No silent reversal or level movement | Invalid state blocks trading; transitions are explicit | Implemented, source/calculation tests |
+| PRICE-04 | Different-symbol prices are rebuilt while Direction/mode survive | `PS_PersistenceLoad`, `PS_ModelBuildFreshSymbolPlan`, `PS_RefreshMarket`, `OnInit` | Implemented, reference and source-contract tests; user visual check pending |
+| PRICE-05 | Same-symbol timeframe changes preserve the complete plan | Symbol-hash guarded atomic Entry/SL/TP persistence and structural restore | Implemented, source-contract tests; user visual check pending |
+| PRICE-06 | Instant-to-Pending preserves SL and cannot begin quote-ambiguous | Candidate Limit/Stop construction with buffered broker/tick distances | Implemented, reference and source-contract tests; user visual check pending |
+| PRICE-07 | Automatic Entry/SL spacing cannot collapse after normalization | Outward ceiling-to-tick placement plus 0.2%/100-tick/broker/34-pixel gap | Implemented, calculation tests |
+| PTR-04 | Stop owns overlapping Entry/Stop pixels for paint and input | Stop-first hit priority, higher z-order, final paint order, fixed capture enum | Implemented, source-contract tests; user visual check pending |
 
 ## 6. Trading and modification safety
 
@@ -130,8 +135,8 @@ Status terms:
 | ART-06 | Test plan/evidence | `docs/TEST_PLAN.md`, `docs/TEST_EVIDENCE.md` | Delivered; native sections pending |
 | ART-07 | Known limitations | `docs/KNOWN_LIMITATIONS.md` | Delivered |
 | ART-08 | Clean compiled EX5 | `MQL5/Experts/LotCraft/LotCraft.ex5` | Produced by Darwinex MetaEditor, `0 errors, 0 warnings` |
-| ART-09 | Windows installer | `build/LotCraft-1.0.0-Setup.exe` | Rebuilt, PE-tested, and executed on Windows |
-| ART-10 | Four required SHA-256 hashes | `release/LotCraft-1.0.0/RELEASE-VERIFICATION.json`, release verifier outputs | Canonical, staged, and installed EX5 hashes match; installer hash recorded |
+| ART-09 | Windows installer | `build/LotCraft-1.1.0-Setup.exe` | Rebuilt and PE-tested; local installation is part of the release gate |
+| ART-10 | Four required SHA-256 hashes | `release/LotCraft-1.1.0/RELEASE-VERIFICATION.json`, release verifier outputs | Canonical, staged, and installed EX5 hashes must match; installer hash recorded |
 | PKG-01 | Dedicated safe install/upgrade/uninstall | Go installer and manifest | Automated policy/PE evidence plus Windows clean-install, upgrade, protected-refusal, and uninstall smoke passes |
 | PKG-02 | No source in end-user installer | installer owns only EX5, uninstaller, manifest | Implemented, automated test |
 

@@ -55,11 +55,11 @@ def test_product_identity_is_consistent():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     assert '#property copyright "LotCraft"' in main
     # MetaEditor accepts only a two-part numeric #property version. The
-    # user-facing semantic release remains 1.0.0 everywhere else.
-    assert '#property version   "1.00"' in main
-    assert '#property description "LotCraft 1.0.0"' in main
+    # user-facing semantic release is 1.1.0 while persistence remains schema v100.
+    assert '#property version   "1.10"' in main
+    assert '#property description "LotCraft 1.1.0"' in main
     assert '#define PS_PRODUCT_NAME              "LotCraft"' in types
-    assert '#define PS_VERSION_TEXT              "1.0.0"' in types
+    assert '#define PS_VERSION_TEXT              "1.1.0"' in types
     assert '#define PS_SOURCE_NAME               "LotCraft.mq5"' in types
     assert '#define PS_BINARY_NAME               "LotCraft.ex5"' in types
     assert '#define PS_LOG_PREFIX                "LotCraft"' in types
@@ -168,8 +168,13 @@ def test_persistence_contains_configuration_and_symbol_scoped_planning_state():
         "entry", "stop", "take",
     ]:
         assert f'"{allowed}"' in persistence
-    assert "same_planning_symbol" in persistence
-    assert persistence.index("if(same_planning_symbol)") < persistence.index('PS_PersistenceKey(base,"entry")', persistence.index("if(same_planning_symbol)"))
+    load = persistence.split("bool PS_PersistenceLoad", 1)[1]
+    same_symbol_block = load.index("if(same_planning_symbol)")
+    assert load.index('PS_PersistenceKey(base,"direction")') < same_symbol_block
+    assert load.index('PS_PersistenceKey(base,"ordermode")') < same_symbol_block
+    assert load.index('PS_PersistenceKey(base,"entry")') > same_symbol_block
+    assert "same_symbol_plan_loaded=true;" in load
+    assert "return(same_symbol_plan_loaded);" in load
     assert "PS_STATE_NAMESPACE" in persistence
 
 
@@ -185,6 +190,19 @@ def test_lines_are_hlines_locked_and_handles_are_separate_hit_tested_objects():
     assert "PS_UISetRect(candidate,x,y-13,36,26);" in ui
     assert "ChartXYToTimePrice" in ALL_SOURCE
     assert "CHARTEVENT_OBJECT_DRAG" in ALL_SOURCE
+
+
+def test_stop_marker_owns_overlapping_pixels_in_hit_order_zorder_and_paint_order():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    hit = re.search(r"PSLevelId PS_UIHitHandle.*?\n  \}", ui, re.S).group(0)
+    ensure = re.search(r"bool PS_UIEnsureHandleCanvas.*?\n  \}", ui, re.S).group(0)
+    update = re.search(r"void PS_UIUpdateLines.*?\n  \}", ui, re.S).group(0)
+    assert "int hit_priority[3]={1,0,2};" in hit
+    assert hit.index("hit_priority") < hit.index("g_ps_handle_visible[i]")
+    assert "level==PS_LEVEL_STOP ? 50020" in ensure
+    assert "level==PS_LEVEL_ENTRY ? 50010" in ensure
+    assert "int paint_order[3]={2,0,1};" in update
+    assert "visual overlap does not change long/short" in hit.lower()
 
 
 def test_level_lines_are_painted_behind_the_interface():
@@ -273,23 +291,42 @@ def test_handle_visibility_is_bound_to_line_visibility_and_viewport():
     assert "g_ps_handle_visible" in ui
 
 
-def test_symbol_change_reanchors_pending_and_instant_planning_levels_to_new_chart():
+def test_symbol_change_builds_one_fresh_mode_aware_plan_before_activation():
     main = MAIN.read_text(encoding="utf-8")
     risk = (SRC / "PS_Risk.mqh").read_text(encoding="utf-8")
     refresh = re.search(r"void PS_RefreshMarket.*?\n  \}", main, re.S).group(0)
     chart_event = re.search(r"void OnChartEvent.*", main, re.S).group(0)
-    reanchor = re.search(r"bool PS_ModelReanchorForSymbol.*?\n  \}", risk, re.S).group(0)
+    fresh = risk.split("bool PS_ModelBuildFreshSymbolPlan", 2)[2]
 
     assert "string g_active_symbol" in main
     assert "refreshed.symbol!=previous_symbol" in refresh
-    assert "PS_EditorReset(g_editor);" in refresh
-    assert "PS_ModelReanchorForSymbol(g_model,g_market,visible_min,visible_max);" in refresh
+    assert refresh.index("PS_SaveState();") < refresh.index("PS_CopyMarketSnapshot(g_market,refreshed);")
+    assert "PS_AbortInteractionForContextChange();" in refresh
+    assert "PS_BuildFreshPlan(transition_error)" in refresh
+    assert refresh.index("PS_BuildFreshPlan(transition_error)") < refresh.index("g_active_symbol=refreshed.symbol;")
     assert "PS_RefreshMarket(false);" in chart_event.split("if(id==CHARTEVENT_CHART_CHANGE)", 1)[1]
-    assert "model.entry=entry;" in reanchor
-    assert "model.stop_loss=stop;" in reanchor
-    assert "visible_max>visible_min" in reanchor
-    assert "model.order_mode" not in reanchor
-    assert "Position" not in reanchor and "Order" not in reanchor
+    assert "PSModel candidate;" in fresh
+    assert "candidate.order_mode==PS_ORDER_PENDING" in fresh
+    assert "PS_ModelValidateCandidate(candidate,market,error)" in fresh
+    assert "PS_CopyModel(model,candidate);" in fresh
+
+
+def test_automatic_planning_levels_have_a_price_relative_minimum_sl_gap():
+    risk = (SRC / "PS_Risk.mqh").read_text(encoding="utf-8")
+    helper = re.search(r"double PS_ModelDefaultLevelDistance.*?\n  \}", risk, re.S).group(0)
+    initialize = re.search(r"void PS_ModelInitialize.*?\n  \}", risk, re.S).group(0)
+    ensure = re.search(r"bool PS_ModelEnsureInitialPrices.*?\n  \}", risk, re.S).group(0)
+    fresh_gap = re.search(r"double PS_ModelRequiredFreshGap.*?\n  \}", risk, re.S).group(0)
+    direction = re.search(r"void PS_ModelChangeDirection.*?\n  \}", risk, re.S).group(0)
+    assert "reference*0.002" in helper
+    assert "100.0*market.tick_size" in helper
+    assert "PS_MarketProtectiveDistance(market,true)+market.tick_size" in helper
+    assert "PS_ModelDefaultLevelDistance(model.entry,market)" in initialize
+    assert "PS_ModelDefaultLevelDistance(executable,market)" in ensure
+    assert "PS_ModelDefaultLevelDistance(reference,market)" in fresh_gap
+    assert "34.0/(double)chart_height" in fresh_gap
+    assert "visual/=0.60" in fresh_gap
+    assert "PS_ModelDefaultLevelDistance(old_entry,market)" in direction
 
 
 def test_timeframe_reinitialization_restores_same_symbol_planning_state_only():
@@ -300,7 +337,11 @@ def test_timeframe_reinitialization_restores_same_symbol_planning_state_only():
     assert "PS_HashString32(market.symbol)" in persistence
     assert "same_planning_symbol" in persistence
     assert "PS_PersistenceSave(g_persistence_base,g_market,g_model);" in main
-    assert "PS_PersistenceLoad(g_persistence_base,g_market,g_model);" in main
+    assert "bool same_symbol_plan_loaded=PS_PersistenceLoad(g_persistence_base,g_market,g_model);" in main
+    assert "same_symbol_plan_loaded &&" in main
+    assert "PS_ModelStoredPlanStructurallyValid(g_model,g_market)" in main
+    assert "if(!coherent_plan)" in main
+    assert "coherent_plan=PS_BuildFreshPlan(transition_error);" in main
 
 
 def test_pointer_guard_preserves_and_restores_chart_properties():
@@ -701,9 +742,37 @@ def test_instant_entry_handle_drag_switches_to_pending_and_remains_movable():
     main = MAIN.read_text(encoding="utf-8")
     update = re.search(r"bool PS_UpdateLevelFromPointer.*?\n  \}", main, re.S).group(0)
     move = re.search(r"void PS_MouseMoveCaptured.*?\n  \}", main, re.S).group(0)
-    assert "PS_ModelChangeOrderMode(g_model,g_market,PS_ORDER_PENDING);" in update
+    assert "PS_ModelChangeOrderMode(g_model,g_market,PS_ORDER_PENDING,mode_error)" in update
+    assert "if(!PS_ModelChangeOrderMode" in update
     assert "Entry handle is market-bound" not in update
     assert "Entry handle is market-bound" not in move
+
+
+def test_order_mode_transition_is_candidate_based_failure_aware_and_recalculated_once():
+    risk = (SRC / "PS_Risk.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    transition = risk.split("bool PS_ModelChangeOrderMode", 2)[2]
+    action = re.search(r"void PS_Action.*?\n  \}", main, re.S).group(0)
+    order_case = action.split("case PS_CTRL_ORDER_MODE:", 1)[1].split("case PS_CTRL_LINES:", 1)[0]
+    assert "PSModel candidate;" in transition
+    assert "PS_CopyModel(candidate,model);" in transition
+    assert "candidate.stop_loss" in transition
+    assert "PS_ModelValidateCandidate(candidate,market,error)" in transition
+    assert "PS_CopyModel(model,candidate);" in transition
+    assert "bool PS_ModelChangeOrderMode" in risk
+    assert "if(!PS_ModelChangeOrderMode" in order_case
+    assert order_case.count("PS_Recalculate(false);") == 1
+    assert "PS_SaveState();" in order_case
+
+
+def test_captured_handle_motion_never_retests_handle_identity():
+    main = MAIN.read_text(encoding="utf-8")
+    press = re.search(r"void PS_MousePress.*?\n  \}", main, re.S).group(0)
+    move = re.search(r"void PS_MouseMoveCaptured.*?\n  \}", main, re.S).group(0)
+    release = re.search(r"void PS_MouseRelease.*?\n  \}", main, re.S).group(0)
+    assert "PS_UIHitHandle" in press
+    assert "PS_UIHitHandle" not in move
+    assert "PS_UIHitHandle" not in release
 
 
 def test_risk_money_field_shows_actual_risk_in_parentheses_when_different():
@@ -793,7 +862,7 @@ def test_release_source_uses_metaeditor_compatible_constant_forms():
     main = MAIN.read_text(encoding="utf-8")
     logging = (SRC / "PS_Logging.mqh").read_text(encoding="utf-8")
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
-    assert '#property version   "1.00"' in main
+    assert '#property version   "1.10"' in main
     assert not re.search(r"(?m)^\s*#if\s+(?!def\b|ndef\b)", logging)
     assert "const color text_color=C'154,164,181'" in ui
 

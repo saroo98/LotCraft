@@ -15,8 +15,8 @@ RELEASE_SOURCE = RELEASE_SCRIPT.read_text(encoding="utf-8")
 
 def test_installer_identity_and_dedicated_destination_are_exact():
     assert 'productName       = "LotCraft"' in SOURCE
-    assert 'productVersion    = "1.0.0"' in SOURCE
-    assert 'setupTitle        = "LotCraft 1.0.0 Setup"' in SOURCE
+    assert 'productVersion    = "1.1.0"' in SOURCE
+    assert 'setupTitle        = "LotCraft 1.1.0 Setup"' in SOURCE
     assert 'ex5Name           = "LotCraft.ex5"' in SOURCE
     assert 'defaultInstallRel = `MQL5\\Experts\\LotCraft`' in SOURCE
     assert r"\LotCraft" in POLICY_SOURCE

@@ -15,8 +15,11 @@ from reference_model import (
     OrderMode,
     OrderType,
     RiskAuthority,
+    build_fresh_symbol_plan,
     calculate,
+    change_order_mode,
     floor_volume,
+    pending_leg_gap,
     switch_account_mode,
 )
 
@@ -132,6 +135,139 @@ def test_commission_zero_and_nonzero(mode, commission, expected_one_lot):
     )
     assert result.valid
     assert result.one_lot_risk == pytest.approx(expected_one_lot)
+
+
+@pytest.mark.parametrize(
+    ("entry", "tick_size", "broker_minimum"),
+    [
+        (1.13843, 0.00001, 0.00020),
+        (27679.40, 0.01, 5.80),
+        (65000.0, 0.10, 10.0),
+    ],
+)
+def test_automatic_symbol_reanchor_keeps_sl_visibly_separate_after_normalization(
+    entry, tick_size, broker_minimum
+):
+    distance = max(broker_minimum + tick_size, 100.0 * tick_size, entry * 0.002)
+    long_stop = round((entry - distance) / tick_size) * tick_size
+    short_stop = round((entry + distance) / tick_size) * tick_size
+    assert entry - long_stop >= entry * 0.002 - tick_size * 0.5
+    assert short_stop - entry >= entry * 0.002 - tick_size * 0.5
+    assert long_stop < entry
+    assert short_stop > entry
+
+
+@pytest.mark.parametrize("direction", [Direction.LONG, Direction.SHORT])
+def test_fresh_instant_plan_has_directional_normalized_sl_gap(direction):
+    market = Market(symbol="USTEC", bid=29479.3, ask=29479.5, point=0.01, tick_size=0.1, digits=1)
+    plan = build_fresh_symbol_plan(Model(direction=direction), market)
+    reference = market.ask if direction is Direction.LONG else market.bid
+    assert plan.entry == pytest.approx(reference)
+    assert (plan.stop_loss < plan.entry) if direction is Direction.LONG else (plan.stop_loss > plan.entry)
+    assert abs(plan.entry - plan.stop_loss) >= abs(reference) * 0.002 - market.tick_size * 0.5
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected"),
+    [(Direction.LONG, OrderType.BUY_LIMIT), (Direction.SHORT, OrderType.SELL_LIMIT)],
+)
+def test_fresh_pending_plan_prefers_unambiguous_supported_limit(direction, expected):
+    market = Market(symbol="US30", bid=54423.4, ask=54423.6, point=0.1, tick_size=0.1, digits=1)
+    plan = build_fresh_symbol_plan(Model(direction=direction, order_mode=OrderMode.PENDING), market)
+    result = calculate(plan, market)
+    assert result.valid, result.error
+    assert result.order_type is expected
+    assert result.volume > 0
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected"),
+    [(Direction.LONG, OrderType.BUY_STOP), (Direction.SHORT, OrderType.SELL_STOP)],
+)
+def test_fresh_pending_plan_falls_back_to_supported_stop(direction, expected):
+    market = Market(
+        symbol="USTEC", bid=29479.3, ask=29479.5, point=0.1, tick_size=0.1, digits=1,
+        allow_limit=False, allow_stop=True,
+    )
+    plan = build_fresh_symbol_plan(Model(direction=direction, order_mode=OrderMode.PENDING), market)
+    assert calculate(plan, market).order_type is expected
+
+
+def test_fresh_pending_plan_rejects_unsupported_subtypes_without_mutating_source():
+    original = Model(order_mode=OrderMode.PENDING, entry=157.517, stop_loss=157.006, revision=9)
+    market = Market(allow_limit=False, allow_stop=False)
+    with pytest.raises(ValueError, match="unsupported"):
+        build_fresh_symbol_plan(original, market)
+    assert original == Model(order_mode=OrderMode.PENDING, entry=157.517, stop_loss=157.006, revision=9)
+
+
+def test_usdjpy_pending_to_ustec_preserves_preferences_but_replaces_all_prices():
+    old = Model(
+        direction=Direction.LONG,
+        order_mode=OrderMode.PENDING,
+        entry=157.517,
+        stop_loss=157.006,
+        take_profit=158.0,
+    )
+    ustec = Market(symbol="USTEC", bid=29479.3, ask=29479.5, point=0.1, tick_size=0.1, digits=1)
+    plan = build_fresh_symbol_plan(old, ustec, visible_min=28700, visible_max=30000, chart_height=900)
+    assert plan.direction is Direction.LONG
+    assert plan.order_mode is OrderMode.PENDING
+    assert {plan.entry, plan.stop_loss, plan.take_profit}.isdisjoint({old.entry, old.stop_loss, old.take_profit})
+    assert plan.entry != plan.stop_loss
+    assert calculate(plan, ustec).valid
+
+
+def test_fresh_plan_meets_34_pixel_entry_sl_spacing_when_viewport_is_coherent():
+    market = Market(symbol="USTEC", bid=29479.3, ask=29479.5, point=0.1, tick_size=0.1, digits=1)
+    plan = build_fresh_symbol_plan(
+        Model(order_mode=OrderMode.PENDING), market,
+        visible_min=28000, visible_max=30000, chart_height=1000,
+    )
+    price_per_pixel=(30000-28000)/1000
+    assert abs(plan.entry-plan.stop_loss)/price_per_pixel >= 34 - 1e-9
+
+
+@pytest.mark.parametrize("direction", [Direction.LONG, Direction.SHORT])
+def test_instant_to_pending_preserves_sl_and_is_stable_inside_half_safety_buffer(direction):
+    market = Market(symbol="US30", bid=54423.4, ask=54423.6, point=0.1, tick_size=0.1, digits=1)
+    stop = 54104.0 if direction is Direction.LONG else 54743.0
+    instant = Model(direction=direction, entry=54423.6, stop_loss=stop, revision=12)
+    pending = change_order_mode(instant, market, OrderMode.PENDING)
+    assert pending.stop_loss == instant.stop_loss
+    assert pending.order_mode is OrderMode.PENDING
+    assert pending.revision == instant.revision + 1
+    initial = calculate(pending, market)
+    assert initial.valid and initial.volume > 0
+    buffer = pending_leg_gap(market) / 2
+    for movement in (-buffer, -buffer / 2, 0.0, buffer / 2, buffer):
+        moved = replace(market, bid=market.bid + movement, ask=market.ask + movement)
+        result = calculate(pending, moved)
+        assert result.valid, result.error
+        assert result.order_type is initial.order_type
+        assert result.volume > 0
+
+
+def test_failed_mode_conversion_leaves_immutable_model_and_revision_unchanged():
+    original = Model(stop_loss=1.0990, revision=22)
+    market = Market(allow_limit=False, allow_stop=False)
+    with pytest.raises(ValueError):
+        change_order_mode(original, market, OrderMode.PENDING)
+    assert original.order_mode is OrderMode.INSTANT
+    assert original.entry == 1.1002
+    assert original.stop_loss == 1.0990
+    assert original.revision == 22
+
+
+def test_pending_conversion_preserves_valid_tp_and_translates_invalid_tp():
+    market = Market()
+    valid = Model(stop_loss=1.0950, take_profit=1.1100)
+    valid_pending = change_order_mode(valid, market, OrderMode.PENDING)
+    assert valid_pending.take_profit == valid.take_profit
+    invalid = replace(valid, take_profit=1.0960)
+    translated = change_order_mode(invalid, market, OrderMode.PENDING)
+    assert translated.take_profit > translated.entry
+    assert translated.take_profit != invalid.take_profit
 
 
 @pytest.mark.parametrize(

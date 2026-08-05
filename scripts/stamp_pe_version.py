@@ -204,9 +204,9 @@ def pe_checksum(raw: bytearray, checksum_offset: int) -> int:
 def stamp(input_path: Path, output_path: Path, *, objcopy: str) -> None:
     version_info = make_version_info(
         product="LotCraft",
-        version=(1, 0, 0, 0),
-        filename="LotCraft-1.0.0-Setup.exe",
-        description="LotCraft 1.0.0 Installer",
+        version=(1, 1, 0, 0),
+        filename="LotCraft-1.1.0-Setup.exe",
+        description="LotCraft 1.1.0 Installer",
     )
     section, data_entry_offset, blob_offset = make_resource_section(version_info)
 
@@ -290,9 +290,9 @@ def verify(path: Path) -> None:
     for text in [
         "VS_VERSION_INFO",
         "LotCraft",
-        "LotCraft 1.0.0 Installer",
-        "LotCraft-1.0.0-Setup.exe",
-        "1.0.0.0",
+        "LotCraft 1.1.0 Installer",
+        "LotCraft-1.1.0-Setup.exe",
+        "1.1.0.0",
     ]:
         if utf16z(text) not in payload:
             raise ValueError(f"VERSIONINFO verification failed: missing {text!r}")

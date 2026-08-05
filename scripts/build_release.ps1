@@ -14,25 +14,25 @@ Set-StrictMode -Version Latest
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Product = "LotCraft"
-$Version = "1.0.0"
+$Version = "1.1.0"
 $Source = Join-Path $ProjectRoot "MQL5\Experts\LotCraft\LotCraft.mq5"
 $CanonicalEx5 = Join-Path $ProjectRoot "MQL5\Experts\LotCraft\LotCraft.ex5"
 $BuildRoot = Join-Path $ProjectRoot "build"
 $CompileRoot = Join-Path $BuildRoot "metaeditor"
 $CompileLog = Join-Path $CompileRoot "LotCraft-compile.log"
-$InstallerSource = Join-Path $BuildRoot "LotCraft-1.0.0-Setup.exe"
+$InstallerSource = Join-Path $BuildRoot "LotCraft-1.1.0-Setup.exe"
 if ([string]::IsNullOrWhiteSpace($ReleaseDirectory)) {
-    $ReleaseDirectory = Join-Path $ProjectRoot "release\LotCraft-1.0.0"
+    $ReleaseDirectory = Join-Path $ProjectRoot "release\LotCraft-1.1.0"
 }
 $ReleaseDirectory = [System.IO.Path]::GetFullPath($ReleaseDirectory)
 $StagedEx5 = Join-Path $ReleaseDirectory "LotCraft.ex5"
-$StagedInstaller = Join-Path $ReleaseDirectory "LotCraft-1.0.0-Setup.exe"
+$StagedInstaller = Join-Path $ReleaseDirectory "LotCraft-1.1.0-Setup.exe"
 $UpdateManifest = Join-Path $ReleaseDirectory "LotCraft-update.json"
 $UpdateSignature = Join-Path $ReleaseDirectory "LotCraft-update.sig"
-$ReleaseChecksum = Join-Path $ReleaseDirectory "LotCraft-1.0.0-SHA256.txt"
+$ReleaseChecksum = Join-Path $ReleaseDirectory "LotCraft-1.1.0-SHA256.txt"
 $UpdatePublicKeyFile = Join-Path $ProjectRoot "installer\update-public-key.txt"
 $EmbeddedEx5 = Join-Path $ProjectRoot "installer\cmd\setup\embedded_payload.txt"
-$RawInstaller = Join-Path $BuildRoot ".tmp\LotCraft-1.0.0-Setup.unstamped.exe"
+$RawInstaller = Join-Path $BuildRoot ".tmp\LotCraft-1.1.0-Setup.unstamped.exe"
 if ([string]::IsNullOrWhiteSpace($UpdateSigningKeyPath)) {
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
         throw "LOCALAPPDATA is unavailable. Supply -UpdateSigningKeyPath explicitly."
@@ -152,7 +152,7 @@ finally { Pop-Location }
 $InstallerDigest = (Get-FileHash $StagedInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
 [System.IO.File]::WriteAllText(
     $ReleaseChecksum,
-    "$InstallerDigest  LotCraft-1.0.0-Setup.exe`n",
+    "$InstallerDigest  LotCraft-1.1.0-Setup.exe`n",
     (New-Object System.Text.UTF8Encoding($false))
 )
 
@@ -174,7 +174,7 @@ if ($Install) {
         throw "-TerminalDataDir is required with -Install. Use the real MT5 data directory containing MQL5."
     }
     $TerminalDataDir = (Resolve-Path $TerminalDataDir -ErrorAction Stop).Path
-    $InstallLog = Join-Path $BuildRoot "LotCraft-1.0.0-install.log"
+    $InstallLog = Join-Path $BuildRoot "LotCraft-1.1.0-install.log"
     # Start-Process joins ArgumentList entries into one command line and does
     # not preserve array element boundaries for values containing spaces.
     # Use quoted -name=value tokens so the Go flag parser receives each path

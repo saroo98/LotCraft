@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="$ROOT/build"
 TMP="$BUILD/.tmp"
-RAW="$TMP/LotCraft-1.0.0-Setup.unstamped.exe"
-FINAL="$BUILD/LotCraft-1.0.0-Setup.exe"
+RAW="$TMP/LotCraft-1.1.0-Setup.unstamped.exe"
+FINAL="$BUILD/LotCraft-1.1.0-Setup.exe"
 PAYLOAD="$ROOT/MQL5/Experts/LotCraft/LotCraft.ex5"
 EMBEDDED="$ROOT/installer/cmd/setup/embedded_payload.txt"
 PLACEHOLDER='Build placeholder. scripts/build_release.ps1 temporarily replaces this file with the compiled LotCraft.ex5 payload.'

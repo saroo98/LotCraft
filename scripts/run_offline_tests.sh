@@ -13,5 +13,5 @@ pytest -q --junitxml=build/pytest-results.xml
   go vet ./...
 )
 ./scripts/build_installer.sh
-python3 scripts/stamp_pe_version.py build/LotCraft-1.0.0-Setup.exe build/LotCraft-1.0.0-Setup.exe --verify-only
+python3 scripts/stamp_pe_version.py build/LotCraft-1.1.0-Setup.exe build/LotCraft-1.1.0-Setup.exe --verify-only
 git diff --check

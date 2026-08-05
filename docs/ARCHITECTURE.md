@@ -1,4 +1,4 @@
-# LotCraft 1.0.0 Architecture
+# LotCraft 1.1.0 Architecture
 
 ## 1. Product boundary
 
@@ -34,6 +34,8 @@ The controller enforces these invariants:
 5. Trade creation and stop modification use separate controller paths and separate request builders.
 6. Every chart object that can be deleted by cleanup must prove the current LotCraft instance prefix.
 7. LotCraft horizontal lines are repeatedly locked nonselectable and nonselected. Dedicated rectangle-label handles are the only owned chart drag targets.
+8. Multi-field symbol and order-mode transitions are constructed and validated in a local candidate model, then committed once. Rendering never observes a partially changed transition.
+9. Different-symbol transitions preserve Direction and Instant/Pending preference but generate new symbol-scaled prices. Same-symbol lifecycle changes restore the complete saved price plan.
 
 ## 4. Calculation pipeline
 
@@ -71,6 +73,8 @@ Hit testing is ordered as follows:
 1. Panel bounds and panel controls.
 2. LotCraft drag handles outside the panel.
 3. Unowned chart space.
+
+Within overlapping level handles, Stop has explicit priority over Entry, and Entry over Take-profit. The canvases use the same z-order and paint order. The captured level is fixed on mouse-down, so later pointer samples cannot transfer a Stop drag to Entry.
 
 While LotCraft owns a pointer or keyboard interaction, the UI guard saves and temporarily disables chart mouse scrolling, context menu, crosshair tool, broker trade-level dragging, keyboard chart control, and quick navigation. The exact saved values are restored when ownership ends, on pointer exit, on failure, and during deinitialization.
 
@@ -120,10 +124,14 @@ Persisted values are limited to:
 - risk authority and requested values;
 - commission type and value;
 - confirmation state;
-- full/mini state;
-- line visibility.
+- view and theme state;
+- line visibility;
+- Direction and Instant/Pending preference;
+- one complete Entry/SL/TP planning snapshot guarded by the saved symbol hash.
 
-Prices are not persisted. This prevents a stale price setup from being restored on another symbol. The key includes account login, server hash, and chart ID hash. Object ownership includes account/server/chart-derived instance data.
+Direction and order mode load independently of the symbol hash. Entry, SL, and TP load only as one complete set when the saved symbol matches the current symbol and the plan is structurally coherent. A different symbol therefore keeps the user's planning preferences but never reuses old-symbol numbers. A timeframe change on the same symbol restores the exact normalized plan. The key includes account login, server hash, and chart ID hash. Object ownership includes account/server/chart-derived instance data.
+
+Fresh-symbol planning derives a broker-valid, tick-normalized Entry/SL geometry from the new quote, symbol capabilities, price-relative minimum gap, and a 34-pixel viewport target when the viewport is coherent. Pending construction prefers a supported Limit between quote and SL and falls back to a supported Stop. Instant-to-Pending uses the same candidate discipline, preserves SL exactly, and creates an unambiguous buffered pending Entry before recalculation.
 
 Deinitialization kills the timer, commits or rolls back any active edit safely, flushes allowed state, restores chart properties, and deletes only objects with the proven instance prefix.
 

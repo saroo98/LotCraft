@@ -49,7 +49,7 @@ void PS_PersistenceSave(const string base,const PSMarketSnapshot &market,const P
      }
   }
 
-void PS_PersistenceLoad(const string base,const PSMarketSnapshot &market,PSModel &model)
+bool PS_PersistenceLoad(const string base,const PSMarketSnapshot &market,PSModel &model)
   {
    double value=0.0;
    if(PS_PersistenceRead(PS_PersistenceKey(base,"acct"),value))
@@ -90,33 +90,46 @@ void PS_PersistenceLoad(const string base,const PSMarketSnapshot &market,PSModel
      }
    if(PS_PersistenceRead(PS_PersistenceKey(base,"lines"),value)) model.lines_visible=(value>=0.5);
 
+   if(PS_PersistenceRead(PS_PersistenceKey(base,"direction"),value))
+     {
+      int direction=(int)value;
+      if(direction==PS_DIRECTION_LONG || direction==PS_DIRECTION_SHORT)
+         model.direction=(PSDirection)direction;
+     }
+   if(PS_PersistenceRead(PS_PersistenceKey(base,"ordermode"),value))
+     {
+      int order_mode=(int)value;
+      if(order_mode==PS_ORDER_INSTANT || order_mode==PS_ORDER_PENDING)
+         model.order_mode=(PSOrderMode)order_mode;
+     }
+
    double persisted_symbol=0.0;
    bool same_planning_symbol=
       (market.symbol!="" &&
        PS_PersistenceRead(PS_PersistenceKey(base,"plansym"),persisted_symbol) &&
        (uint)persisted_symbol==PS_HashString32(market.symbol));
+   bool same_symbol_plan_loaded=false;
    if(same_planning_symbol)
      {
-      if(PS_PersistenceRead(PS_PersistenceKey(base,"direction"),value))
+      double entry=0.0;
+      double stop=0.0;
+      double take=0.0;
+      bool entry_ok=(PS_PersistenceRead(PS_PersistenceKey(base,"entry"),entry) &&
+                     PS_IsPositiveFinite(entry));
+      bool stop_ok=(PS_PersistenceRead(PS_PersistenceKey(base,"stop"),stop) &&
+                    PS_IsPositiveFinite(stop));
+      bool take_ok=(PS_PersistenceRead(PS_PersistenceKey(base,"take"),take) &&
+                    PS_IsFinite(take) && take>=0.0);
+      if(entry_ok && stop_ok && take_ok)
         {
-         int direction=(int)value;
-         if(direction==PS_DIRECTION_LONG || direction==PS_DIRECTION_SHORT)
-            model.direction=(PSDirection)direction;
+         model.entry=entry;
+         model.stop_loss=stop;
+         model.take_profit=take;
+         same_symbol_plan_loaded=true;
         }
-      if(PS_PersistenceRead(PS_PersistenceKey(base,"ordermode"),value))
-        {
-         int order_mode=(int)value;
-         if(order_mode==PS_ORDER_INSTANT || order_mode==PS_ORDER_PENDING)
-            model.order_mode=(PSOrderMode)order_mode;
-        }
-      if(PS_PersistenceRead(PS_PersistenceKey(base,"entry"),value) && PS_IsPositiveFinite(value))
-         model.entry=value;
-      if(PS_PersistenceRead(PS_PersistenceKey(base,"stop"),value) && PS_IsPositiveFinite(value))
-         model.stop_loss=value;
-      if(PS_PersistenceRead(PS_PersistenceKey(base,"take"),value) && PS_IsFinite(value) && value>=0.0)
-         model.take_profit=value;
      }
    model.revision++;
+   return(same_symbol_plan_loaded);
   }
 
 #endif

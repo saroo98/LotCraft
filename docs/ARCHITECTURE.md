@@ -18,7 +18,9 @@ The implementation is independent of any Position Sizer product. Runtime objects
 | `PS_Risk.mqh` | Model initialization, direction/order-mode transitions, pending subtype inference, protective-price validation, risk authority, one-lot loss, broker-valid volume | `PSCalcResult`; updates the dependent requested-risk view in `PSModel` |
 | `PS_Editor.mqh` | Custom numeric-edit state machine | Raw text, cursor, anchor, selection, and pre-edit model snapshot |
 | `PS_Persistence.mqh` | Terminal-global persistence for the allowed configuration subset | Keys below `LotCraft.100.<account>.<server-hash>.<chart-hash>` |
-| `PS_UI.mqh` | Custom chart-object rendering, layout, hit testing, line locks, dedicated handles, chart interaction guard, deterministic cleanup | Objects below one instance prefix `LotCraft.v100.<instance-hash>.` |
+| `PS_Exposure.mqh` | Broker-backed projection of current stop-loss outcomes for positions and pending orders | One immutable-per-refresh `PSExposureSnapshot` |
+| `PS_UI_Metrics.mqh` | DPI and chart-fit scaling tokens shared by every panel mode and exposure surface | Current scaled geometry only |
+| `PS_UI.mqh` | Single-canvas panel, exposure sidecar, chart loss labels, layout, hit testing, line locks, dedicated handles, chart interaction guard, deterministic cleanup | Objects below one instance prefix `LotCraft.v100.<instance-hash>.` |
 | `PS_Trade.mqh` | Request construction, `OrderCheck`, `OrderSend`, retcode interpretation, confirmation snapshots, and conservative stop-loss batch execution | Per-action snapshots and temporary request/result records |
 
 ## 3. Authoritative state and invariants
@@ -155,3 +157,20 @@ The updater accepts only a newer stable semantic version from the latest GitHub 
 ## 12. Performance and observability
 
 Release diagnostics use the prefix `LotCraft`. Repeated technical conditions are rate-limited. Internal budgets are defined for pointer handling, calculation, rendering, and trade validation. Detailed budget logging is disabled in release builds through `PS_DIAGNOSTICS=0`.
+
+## 13. Stop-loss exposure data flow
+
+Exposure refresh is event-driven with a bounded fallback:
+
+```text
+OnTradeTransaction / 1 s timer / symbol transition
+  -> PS_ExposureCalculate
+  -> cached PSExposureSnapshot
+  -> main summary + sidecar + chart-label renderers
+```
+
+`PS_ExposureCalculate` enumerates open positions and active pending orders, projects each stored Entry-to-SL result through `OrderCalcProfit`, and records missing-SL or unavailable rows explicitly. Open positions include currently accrued swap. Headline totals are downside-only, so a profitable trailing stop never offsets another row's projected loss. Chart scope matches the current symbol exactly; account scope includes every symbol.
+
+The panel summary, details sidecar, and chart labels consume the same cached snapshot. Rendering never re-enumerates broker positions or orders. Pointer movement stays on the existing line-only path; exposure calculation and label collision resolution run only on trade/symbol/timer refresh or an explicitly dirty render surface.
+
+The sidecar is one bitmap canvas with adaptive right, left, below, above, then clamped-overlay placement. Chart labels are a separate transparent canvas below the E/S/TP handle canvases. Hit precedence outside the panel is handles, sidecar, exposure labels, then unowned chart space.

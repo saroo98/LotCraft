@@ -1539,6 +1539,13 @@ string PS_UIExposureMetricUnavailable(const string label,const double money,
    return(label+" —% ("+PS_FormatMoneyDisplay(money,market)+")");
   }
 
+string PS_UIExposureCompactMoney(const double money,const PSMarketSnapshot &market)
+  {
+   string amount=PS_GroupDecimalText(DoubleToString(MathAbs(money),0));
+   string mark=PS_CurrencyAdornment(market.account_currency);
+   return(StringLen(mark)==1 ? mark+amount : amount+" "+mark);
+  }
+
 string PS_UIExposureWarning(const PSExposureSnapshot &exposure)
   {
    string warning="";
@@ -1570,7 +1577,13 @@ void PS_UIExposureSummary(const PSUIState &ui,const PSExposureSnapshot &exposure
    if(compact)
      {
       PS_PremiumRoundRect(rect.x,rect.y,rect.w,rect.h,4,PS_ThemeControl(),PS_ThemeBorder());
-      string summary=chart+" · "+account;
+      string chart_short="Chart "+(exposure.equity_basis>0.0
+                         ? DoubleToString(exposure.chart_loss_percent,2)+"%" : "—%")+
+                         " ("+PS_UIExposureCompactMoney(exposure.chart_loss_money,market)+")";
+      string account_short="All "+(exposure.equity_basis>0.0
+                           ? DoubleToString(exposure.account_loss_percent,2)+"%" : "—%")+
+                           " ("+PS_UIExposureCompactMoney(exposure.account_loss_money,market)+")";
+      string summary=chart_short+" · "+account_short;
       PS_PremiumText(rect.x+PS_U(9),rect.y+rect.h/2,summary,8,PS_ThemeText(),
                      TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
       if(warning!="")
@@ -1758,13 +1771,15 @@ void PS_UIExposureSidecarRender(PSUIState &ui,const PSExposureSnapshot &exposure
       PSExposureItem item;
       PS_ExposureCopyItem(item,exposure.items[item_index]);
       int top=row_y+row*row_h;
+      if(top+row_h>h-PS_U(28)) break;
       PS_UISetRect(g_exposure_ui.row_rects[row],absolute.x+PS_U(7),absolute.y+top,w-PS_U(14),row_h);
       if(g_exposure_ui.hovered_row==item_index)
          g_ps_exposure_canvas.FillRectangle(PS_U(7),top,w-PS_U(7),top+row_h-1,PS_PremiumColor(PS_ThemeHover()));
       g_ps_exposure_canvas.Line(PS_U(8),top+row_h-1,w-PS_U(8),top+row_h-1,PS_PremiumColor(PS_ThemeDivider()));
       string kind=(item.kind==PS_EXPOSURE_PENDING ? "Pending " : "");
       string direction=(item.direction==PS_DIRECTION_LONG ? "Buy " : "Sell ");
-      string primary=item.symbol+"  "+kind+direction+DoubleToString(item.volume,2);
+      string symbol_text=(StringLen(item.symbol)>12 ? StringSubstr(item.symbol,0,11)+"…" : item.symbol);
+      string primary=symbol_text+"  "+kind+direction+DoubleToString(item.volume,2);
       string ticket=StringFormat("#%04d",(int)(item.ticket%10000));
       string secondary=(PS_IsPositiveFinite(item.stop_loss) ? "SL "+DoubleToString(item.stop_loss,4) : "SL —")+" · "+ticket;
       color result_color=(item.status==PS_EXPOSURE_VALID
@@ -1837,7 +1852,7 @@ void PS_UIExposureLabelsRender(PSUIState &ui,const PSExposureSnapshot &exposure,
    g_ps_exposure_label_count=0;
    if(!PS_UIExposureLabelsCanvasEnsure(ui)) return;
    g_ps_exposure_labels_canvas.Erase(0x00000000);
-   if(!g_exposure_ui.chart_labels_visible)
+   if(!g_exposure_ui.chart_labels_visible || ui.chart_w<PS_U(110) || ui.chart_h<PS_U(40))
      {
       g_ps_exposure_labels_canvas.Update(false);
       return;

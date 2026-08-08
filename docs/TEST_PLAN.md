@@ -144,3 +144,18 @@ Use minimum practical demo volume or a mocked request gateway. Never use a live 
 5. Repeat the Instant-to-Pending test for Short and with Limit disabled/Stop enabled. If neither pending subtype is supported, the previous complete Instant model and calculation must remain unchanged and a capability error must be shown.
 6. Overlap the 36-by-26 E/S hit rectangles while keeping their prices distinct. Press their shared pixels and drag. S must be visually above E and only SL may follow the captured pointer through release.
 7. Repeat the basic checks in Full, Compact, and Mini views and both themes. No layout, editor, stepper, panel-drag, or line-flicker behavior may regress.
+
+## 12. SL exposure and adaptive UI acceptance matrix
+
+| Dimension | Required cases |
+|---|---|
+| Theme and mode | Dark and light; Full, Compact, and Mini. Summary is present only in Full and Compact; persisted details remain bounded in every mode. |
+| DPI geometry | Source-calculated layouts at 96, 120, 144, and 192 DPI; chart widths immediately above and below each base panel width. |
+| Exposure contents | Zero positions; one Long; one Short; profitable trailing SL; missing SL; unavailable projection; pending order; mixed symbols; zero equity. |
+| Row volume | One, eight, nine, and 50 exposure rows; scrolling remains clamped and deterministic. |
+| Label collisions | Eight open-position labels at the same SL; labels beside the S marker, main panel, sidecar, chart top, and chart bottom. S keeps input priority. |
+| Concurrent activity | Drag panel and S/E/TP while exposure becomes dirty; no exposure calculation or collision layout runs in the pointer hot path. |
+| Lifecycle | Change symbol and timeframe while details are open; current-chart scope refreshes without stale-symbol values or off-chart surfaces. |
+| Trading regression | Confirmation behavior, final trade control, calculated volume, pending/instant behavior, and `Move SLs to line` remain unchanged. |
+
+Automated evidence covers arithmetic, sorting, incomplete-data behavior, source ownership, persistence allowlisting, canvas count, hit-test precedence, DPI-scaled tokens, and compile contracts. Actual MT5 appearance and broker interaction remain user-run manual acceptance; this implementation task intentionally performs no live MT5 UI or live-trading verification.

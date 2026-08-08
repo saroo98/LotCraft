@@ -147,3 +147,20 @@ policy/PE structure, native MetaEditor compilation, Windows installer execution,
 and EX5 hash equality pass. Full native chart-interaction acceptance is not
 claimed because the saved demo-account authentication dialog requires user
 interaction before the remaining MT5 pointer and lifecycle matrix can run.
+
+## 10. SL exposure and adaptive UI decisions
+
+| Decision | Exact implementation | Automated evidence |
+|---|---|---|
+| Downside-only chart/account totals; profitable stops do not offset losses | `PS_ExposureCalculate`, `PS_ExposureAggregate` | `tests/test_exposure.py` downside, profitable-stop, scope, zero-equity, and ordering cases |
+| Missing SL and failed projection stay incomplete, never zero | `PS_EXPOSURE_NO_SL`, `PS_EXPOSURE_UNAVAILABLE`, `PS_UIExposureWarning` | `tests/test_exposure.py`, `test_exposure_summary_is_full_and_compact_only` |
+| One cached snapshot feeds every exposure surface | `PS_RefreshExposure`, `g_exposure`, `PS_UIRenderExposureDetails`, `PS_UIRenderExposureLabels` | `test_exposure_refresh_is_event_driven_and_not_on_pointer_motion`, source-call resolution checks |
+| Full and Compact summaries; Mini remains minimal | `PS_CTRL_EXPOSURE_SUMMARY`, `PS_UIExposureSummary` | `test_exposure_summary_is_full_and_compact_only`, geometry contracts |
+| Adaptive one-canvas details surface with eight bounded rows | `PS_UIExposurePlace`, `PS_UIExposureSidecarRender`, `PS_UIExposureHitTest` | `test_exposure_sidecar_is_one_canvas_with_bounded_rows` |
+| Preferences only are persisted | `PS_PersistenceSave`, `PS_PersistenceLoad` keys `Exposure.DetailsOpen`, `Exposure.Scope`, `Exposure.ChartLabels` | `test_exposure_sidecar_persists_preferences_not_financial_data` |
+| One transparent position-label canvas; pending rows stay in details only | `PS_UIExposureLabelsRender`, `PS_UIExposureLabelHitTest` | `test_chart_exposure_labels_use_one_canvas_and_positions_only` |
+| S/E/TP handles retain click precedence over labels | `PS_MousePress`, `PS_UIHitHandle`, then `PS_UIExposureLabelHitTest` | `test_chart_exposure_label_click_keeps_handle_precedence` |
+| DPI/chart-fit scaling is shared by all modes | `PS_UIMetricsRefresh`, `PS_U`, `PS_Font` | scaled-layout source contracts in `tests/test_static_contract.py` |
+| Focus does not recolor the field; selected glyphs alone receive selection fill | `PS_PremiumField`, `PS_PremiumCompactField` | `test_focus_does_not_recolor_the_entire_field` |
+| Currency symbols and ISO fallback are display-only | `PS_CurrencyAdornment`, `PS_FormatMoneyDisplay`; editor raw values remain numeric | currency and field-format source contracts |
+| Hover/press/focus are state-change driven; render surfaces have separate budgets | `g_hovered_control`, `g_pressed_control`, `PS_KeyboardFocusNext`, `PS_UIRenderPanel`, `PS_UIRenderExposureDetails`, `PS_UIRenderExposureLabels` | hover/keyboard/render contract tests |

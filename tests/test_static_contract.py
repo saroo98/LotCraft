@@ -270,6 +270,25 @@ def test_keyboard_focus_has_bounded_order_and_non_color_indicator():
     assert "corner notch" in ui
 
 
+def test_exposure_renderers_consume_cache_and_bound_visual_content():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    render = ui[ui.index("void PS_UIExposureSidecarRender"):ui.index("void PS_PremiumRenderCompact")]
+    for broker_call in ["PositionsTotal(", "OrdersTotal(", "PositionGetTicket(", "OrderGetTicket(", "OrderCalcProfit("]:
+        assert broker_call not in render
+    assert "if(top+row_h>h-PS_U(28)) break;" in render
+    assert "PS_UIExposureCompactMoney" in ui
+    assert 'StringSubstr(item.symbol,0,11)+"…"' in ui
+
+
+def test_exposure_limitations_and_data_flow_are_documented():
+    architecture = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    limitations = (ROOT / "docs" / "KNOWN_LIMITATIONS.md").read_text(encoding="utf-8")
+    assert "OnTradeTransaction / 1 s timer / symbol transition" in architecture
+    assert "rendering never re-enumerates broker positions or orders" in architecture.lower()
+    assert "Future swap, gaps, slippage and unknown closing fees" in limitations
+    assert "are reported as incomplete and are never counted as zero" in limitations
+
+
 def test_required_user_facing_control_text_is_present():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")

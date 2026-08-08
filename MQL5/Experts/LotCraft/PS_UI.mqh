@@ -100,6 +100,9 @@ string  g_ps_exposure_labels_canvas_name="";
 PSRect  g_ps_exposure_label_rects[PS_EXPOSURE_LABEL_MAX];
 int     g_ps_exposure_label_item_indexes[PS_EXPOSURE_LABEL_MAX];
 int     g_ps_exposure_label_count=0;
+PSControlId g_hovered_control=PS_CTRL_NONE;
+PSControlId g_pressed_control=PS_CTRL_NONE;
+PSControlId g_keyboard_focus=PS_CTRL_NONE;
 
 string PS_UIName(const PSUIState &ui,const string suffix)
   {
@@ -1330,7 +1333,30 @@ void PS_PremiumControlButton(const PSUIState &ui,const PSControlId control,const
   {
    PSRect rect;
    PS_PremiumControlRect(ui,control,rect);
+   if(!active && (control==g_pressed_control || control==g_hovered_control))
+     {
+      color fill=(control==g_pressed_control ? PS_ThemePressed() : PS_ThemeHover());
+      PS_PremiumRoundRect(rect.x,rect.y,rect.w,rect.h,4,fill,PS_ThemeBorder());
+      int rendered_size=MathMax(8,(font_size+1)/2);
+      PS_PremiumText(rect.x+rect.w/2,rect.y+rect.h/2,text,rendered_size,PS_ThemeMuted(),
+                     TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
+      return;
+     }
    PS_PremiumButton(rect,text,active,accent,font_size,true);
+  }
+
+void PS_PremiumFocusRing(const PSUIState &ui)
+  {
+   if(g_keyboard_focus<0 || g_keyboard_focus>=PS_CTRL_COUNT ||
+      !g_ps_control_visible[(int)g_keyboard_focus]) return;
+   PSRect rect;
+   PS_PremiumControlRect(ui,g_keyboard_focus,rect);
+   uint accent=PS_PremiumColor(PS_ThemeAction());
+   g_ps_panel_canvas.Rectangle(rect.x-PS_U(1),rect.y-PS_U(1),
+                               rect.x+rect.w,rect.y+rect.h,accent);
+   // The corner notch makes focus visible without relying on color alone.
+   g_ps_panel_canvas.Line(rect.x-PS_U(2),rect.y+PS_U(4),rect.x+PS_U(3),rect.y+PS_U(4),accent);
+   g_ps_panel_canvas.Line(rect.x+PS_U(4),rect.y-PS_U(2),rect.x+PS_U(4),rect.y+PS_U(3),accent);
   }
 
 void PS_PremiumField(const PSUIState &ui,const PSControlId control,const string text,
@@ -1489,8 +1515,16 @@ void PS_PremiumCompactSmallControl(const PSUIState &ui,const PSControlId control
   {
    PSRect rect;
    PS_PremiumControlRect(ui,control,rect);
-   PS_PremiumButton(rect,(copied ? "✓" : text),copied,
-                    (copied ? PS_PREMIUM_GREEN : PS_PREMIUM_BLUE),font_size,true);
+   if(!copied && (control==g_pressed_control || control==g_hovered_control))
+     {
+      color fill=(control==g_pressed_control ? PS_ThemePressed() : PS_ThemeHover());
+      PS_PremiumRoundRect(rect.x,rect.y,rect.w,rect.h,4,fill,PS_ThemeBorder());
+      PS_PremiumText(rect.x+rect.w/2,rect.y+rect.h/2,text,MathMax(8,(font_size+1)/2),
+                     PS_ThemeMuted(),TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
+     }
+   else
+      PS_PremiumButton(rect,(copied ? "✓" : text),copied,
+                       (copied ? PS_PREMIUM_GREEN : PS_PREMIUM_BLUE),font_size,true);
   }
 
 string PS_UIExposureMetric(const string label,const double percent,const double money,
@@ -2091,12 +2125,14 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
    if(model.view_mode==PS_VIEW_MINI)
      {
       PS_PremiumRenderMini(ui,model,calc,market,editor);
+      PS_PremiumFocusRing(ui);
       g_ps_panel_canvas.Update(false);
       return;
      }
    if(model.view_mode==PS_VIEW_COMPACT)
      {
       PS_PremiumRenderCompact(ui,model,calc,market,exposure,editor,copy_feedback_control);
+      PS_PremiumFocusRing(ui);
       g_ps_panel_canvas.Update(false);
       return;
      }
@@ -2208,23 +2244,50 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
    PS_PremiumText(trade_rect.x+trade_rect.w/2,trade_rect.y+trade_rect.h/2,trade_text,13,trade_color,
                   TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
 
+   PS_PremiumFocusRing(ui);
    g_ps_panel_canvas.Update(false);
   }
 
-void PS_UIRender(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
-                 const PSMarketSnapshot &market,const PSExposureSnapshot &exposure,
-                 const PSEditorState &editor,
-                 const PSControlId copy_feedback_control)
+void PS_UIRenderPanel(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
+                      const PSMarketSnapshot &market,const PSExposureSnapshot &exposure,
+                      const PSEditorState &editor,const PSControlId copy_feedback_control)
   {
    ulong started=GetMicrosecondCount();
    PS_UILayout(ui,model.view_mode);
    PS_UIPremiumRender(ui,model,calc,market,exposure,editor,copy_feedback_control);
-   PS_UIExposureSidecarRender(ui,exposure,market);
-   PS_UIExposureLabelsRender(ui,exposure,market);
    PS_UIUpdateLines(ui,model,market);
-   ChartRedraw(ChartID());
    ui.dirty=false;
-   PS_PerfCheck("render-premium",started,PS_RENDER_BUDGET_US);
+   PS_PerfCheck("render-panel",started,PS_RENDER_BUDGET_US);
+  }
+
+void PS_UIRenderExposureDetails(PSUIState &ui,const PSModel &model,
+                                const PSExposureSnapshot &exposure,
+                                const PSMarketSnapshot &market)
+  {
+   ulong started=GetMicrosecondCount();
+   PS_UISelectTheme(model.theme_mode);
+   PS_UIExposureSidecarRender(ui,exposure,market);
+   PS_PerfCheck("render-exposure-details",started,PS_EXPOSURE_DETAILS_BUDGET_US);
+  }
+
+void PS_UIRenderExposureLabels(PSUIState &ui,const PSModel &model,
+                               const PSExposureSnapshot &exposure,
+                               const PSMarketSnapshot &market)
+  {
+   ulong started=GetMicrosecondCount();
+   PS_UISelectTheme(model.theme_mode);
+   PS_UIExposureLabelsRender(ui,exposure,market);
+   PS_PerfCheck("render-exposure-labels",started,PS_EXPOSURE_LABELS_BUDGET_US);
+  }
+
+void PS_UIRender(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
+                 const PSMarketSnapshot &market,const PSExposureSnapshot &exposure,
+                 const PSEditorState &editor,const PSControlId copy_feedback_control)
+  {
+   PS_UIRenderPanel(ui,model,calc,market,exposure,editor,copy_feedback_control);
+   PS_UIRenderExposureDetails(ui,model,exposure,market);
+   PS_UIRenderExposureLabels(ui,model,exposure,market);
+   ChartRedraw(ChartID());
   }
 
 void PS_UIHidePanelContent(const PSUIState &ui)

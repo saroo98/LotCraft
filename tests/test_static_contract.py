@@ -249,6 +249,27 @@ def test_chart_exposure_label_click_keeps_handle_precedence():
     assert "g_exposure_ui.scope=PS_EXPOSURE_SCOPE_CHART;" in main
 
 
+def test_hover_and_press_redraw_only_when_state_changes():
+    main = MAIN.read_text(encoding="utf-8")
+    assert "g_hovered_control" in main
+    assert "if(next_hover!=g_hovered_control)" in main
+    assert "g_panel_dirty" in main
+    assert "g_exposure_details_dirty" in main
+    assert "g_exposure_labels_dirty" in main
+
+
+def test_keyboard_focus_has_bounded_order_and_non_color_indicator():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    assert "PS_KeyboardFocusNext" in main
+    for control in ["PS_CTRL_ENTRY_FIELD", "PS_CTRL_STOP_FIELD", "PS_CTRL_TAKE_FIELD",
+                    "PS_CTRL_RISK_PERCENT_FIELD", "PS_CTRL_RISK_MONEY_FIELD", "PS_CTRL_CONFIRM",
+                    "PS_CTRL_MOVE_SLS", "PS_CTRL_EXPOSURE_SUMMARY", "PS_CTRL_TRADE"]:
+        assert control in main
+    assert "PS_PremiumFocusRing" in ui
+    assert "corner notch" in ui
+
+
 def test_required_user_facing_control_text_is_present():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")

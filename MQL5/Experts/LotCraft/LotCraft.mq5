@@ -42,6 +42,9 @@ int    g_pointer_motion_x=0;
 int    g_pointer_motion_y=0;
 bool   g_update_check_launched=false;
 bool   g_exposure_dirty=true;
+bool   g_panel_dirty=true;
+bool   g_exposure_details_dirty=true;
+bool   g_exposure_labels_dirty=true;
 ulong  g_update_check_start_ms=0;
 PSFieldId g_last_editor_click_field=PS_FIELD_NONE;
 PSControlId g_copy_feedback_control=PS_CTRL_NONE;
@@ -78,6 +81,8 @@ void PS_RefreshExposure(const bool force=false)
    if(changed)
      {
       g_ui.dirty=true;
+      g_exposure_details_dirty=true;
+      g_exposure_labels_dirty=true;
       g_ui.line_dirty=true;
      }
   }
@@ -213,8 +218,36 @@ void PS_RenderIfDirty()
       if(g_ui.line_dirty) PS_UIRenderLinesOnly(g_ui,g_model,g_market);
       return;
      }
-   if(g_ui.dirty) PS_UIRender(g_ui,g_model,g_calc,g_market,g_exposure,g_editor,g_copy_feedback_control);
-   else if(g_ui.line_dirty) PS_UIRenderLinesOnly(g_ui,g_model,g_market);
+   if(g_ui.dirty)
+     {
+      g_panel_dirty=true;
+      g_ui.dirty=false;
+     }
+   bool redraw=false;
+   if(g_panel_dirty)
+     {
+      PS_UIRenderPanel(g_ui,g_model,g_calc,g_market,g_exposure,g_editor,g_copy_feedback_control);
+      g_panel_dirty=false;
+      redraw=true;
+     }
+   if(g_exposure_details_dirty)
+     {
+      PS_UIRenderExposureDetails(g_ui,g_model,g_exposure,g_market);
+      g_exposure_details_dirty=false;
+      redraw=true;
+     }
+   if(g_exposure_labels_dirty)
+     {
+      PS_UIRenderExposureLabels(g_ui,g_model,g_exposure,g_market);
+      g_exposure_labels_dirty=false;
+      redraw=true;
+     }
+   if(g_ui.line_dirty)
+     {
+      PS_UIRenderLinesOnly(g_ui,g_model,g_market);
+      redraw=true;
+     }
+   if(redraw) ChartRedraw(ChartID());
   }
 
 bool PS_CommitEditor()
@@ -524,18 +557,24 @@ void PS_Action(const PSControlId control)
          g_model.revision++;
          PS_SaveState();
          g_ui.dirty=true;
+         g_exposure_details_dirty=true;
+         g_exposure_labels_dirty=true;
          break;
       case PS_CTRL_MINI:
          g_model.view_mode=(g_model.view_mode==PS_VIEW_MINI ? PS_VIEW_FULL : PS_VIEW_MINI);
          g_model.revision++;
          PS_SaveState();
          g_ui.dirty=true;
+         g_exposure_details_dirty=true;
+         g_exposure_labels_dirty=true;
          break;
       case PS_CTRL_THEME:
          g_model.theme_mode=(g_model.theme_mode==PS_THEME_DARK ? PS_THEME_LIGHT : PS_THEME_DARK);
          g_model.revision++;
          PS_SaveState();
          g_ui.dirty=true;
+         g_exposure_details_dirty=true;
+         g_exposure_labels_dirty=true;
          break;
       case PS_CTRL_CLOSE:
          ExpertRemove();
@@ -600,6 +639,8 @@ void PS_Action(const PSControlId control)
          g_exposure_ui.details_open=!g_exposure_ui.details_open;
          g_exposure_ui.scroll_offset=0;
          g_ui.dirty=true;
+         g_exposure_details_dirty=true;
+         g_exposure_labels_dirty=true;
          PS_SaveState();
          break;
       case PS_CTRL_MOVE_SLS:
@@ -724,7 +765,8 @@ void PS_ExposureAction(const PSExposureHit hit,const int visible_row)
         }
      }
    if(persist) PS_SaveState();
-   g_ui.dirty=true;
+   g_exposure_details_dirty=true;
+   g_exposure_labels_dirty=true;
   }
 
 bool PS_IsMotionCapture()
@@ -775,6 +817,11 @@ void PS_ResetCapture(const int x,const int y)
    g_pointer.stepper_pointer_inside=false;
    g_exposure_pressed_hit=PS_EXPOSURE_HIT_NONE;
    g_exposure_pressed_row=-1;
+   if(g_pressed_control!=PS_CTRL_NONE)
+     {
+      g_pressed_control=PS_CTRL_NONE;
+      g_panel_dirty=true;
+     }
    PS_UpdateInteractionGuard(x,y);
   }
 
@@ -814,6 +861,9 @@ void PS_MousePress(const int x,const int y)
       PS_UIGuardEnter(g_ui);
       PSControlId control=PS_UIHitControl(x,y);
       g_pointer.control=control;
+      g_pressed_control=control;
+      g_keyboard_focus=control;
+      g_panel_dirty=true;
       PSFieldId field=PS_UIFieldForControl(control);
       if(field!=PS_FIELD_NONE && PS_UIControlIsEditable(control,g_model))
         {
@@ -926,7 +976,8 @@ void PS_MousePress(const int x,const int y)
       g_exposure_ui.scroll_offset=PS_ClampInt(filtered_index-3,0,maximum);
       g_exposure_ui.hovered_row=label_item_index;
       g_exposure_hover_until_ms=GetTickCount64()+1500;
-      g_ui.dirty=true;
+      g_exposure_details_dirty=true;
+      g_exposure_labels_dirty=true;
       PS_SaveState();
       PS_RenderIfDirty();
       PS_UIGuardEnter(g_ui);
@@ -1012,6 +1063,8 @@ void PS_MouseRelease(const int x,const int y)
      {
       PS_UISetPanelPosition(g_ui,x-g_pointer.panel_offset_x,y-g_pointer.panel_offset_y,g_model.view_mode);
       PS_UIPreparePanelDrop(g_ui);
+      g_exposure_details_dirty=true;
+      g_exposure_labels_dirty=true;
      }
    if(g_pointer.capture==PS_CAPTURE_CONTROL && g_pointer.control!=PS_CTRL_NONE)
      {
@@ -1060,6 +1113,13 @@ void PS_HandleMouseEvent(const int x,const int y,const uint mask)
 
    if(g_pointer.capture==PS_CAPTURE_NONE)
      {
+      PSControlId next_hover=(PS_UIInPanel(g_ui,x,y) ? PS_UIHitControl(x,y) : PS_CTRL_NONE);
+      if(next_hover!=g_hovered_control)
+        {
+         g_hovered_control=next_hover;
+         g_panel_dirty=true;
+         PS_RenderIfDirty();
+        }
       PS_UpdateInteractionGuard(x,y);
       if(left && !was_left) PS_MousePress(x,y);
      }
@@ -1076,10 +1136,71 @@ void PS_HandleMouseEvent(const int x,const int y,const uint mask)
    g_pointer.last_mouse_mask=mask;
   }
 
+void PS_KeyboardFocusNext(const bool reverse)
+  {
+   PSControlId order[9];
+   order[0]=PS_CTRL_ENTRY_FIELD;
+   order[1]=PS_CTRL_STOP_FIELD;
+   order[2]=PS_CTRL_TAKE_FIELD;
+   order[3]=PS_CTRL_RISK_PERCENT_FIELD;
+   order[4]=PS_CTRL_RISK_MONEY_FIELD;
+   order[5]=PS_CTRL_CONFIRM;
+   order[6]=PS_CTRL_MOVE_SLS;
+   order[7]=PS_CTRL_EXPOSURE_SUMMARY;
+   order[8]=PS_CTRL_TRADE;
+   if(g_editor.active && !PS_CommitEditor()) return;
+   int current=-1;
+   for(int i=0;i<9;i++) if(order[i]==g_keyboard_focus) current=i;
+   for(int step=1;step<=9;step++)
+     {
+      int index=(reverse ? current-step : current+step);
+      while(index<0) index+=9;
+      index%=9;
+      PSControlId candidate=order[index];
+      if(candidate==PS_CTRL_ENTRY_FIELD && g_model.order_mode==PS_ORDER_INSTANT) continue;
+      if(candidate<0 || candidate>=PS_CTRL_COUNT || !g_ps_control_visible[(int)candidate]) continue;
+      g_keyboard_focus=candidate;
+      PSFieldId field=PS_UIFieldForControl(candidate);
+      if(field!=PS_FIELD_NONE && PS_UIControlIsEditable(candidate,g_model))
+        {
+         PS_EditorBegin(g_editor,field,g_model,g_market);
+         PS_EditorSelectAll(g_editor);
+        }
+      g_panel_dirty=true;
+      PS_UIGuardEnter(g_ui);
+      PS_RenderIfDirty();
+      return;
+     }
+  }
+
 void PS_HandleKeyDown(const int key)
   {
    if(key==16) g_shift_down=true;
    if(key==17) g_ctrl_down=true;
+   if(key==9)
+     {
+      PS_KeyboardFocusNext(g_shift_down);
+      return;
+     }
+   if(key==27)
+     {
+      if(g_editor.active) PS_CancelEditor();
+      else if(g_exposure_ui.details_open)
+        {
+         g_exposure_ui.details_open=false;
+         g_exposure_details_dirty=true;
+         g_exposure_labels_dirty=true;
+         PS_SaveState();
+        }
+      g_panel_dirty=true;
+      PS_RenderIfDirty();
+      return;
+     }
+   if(!g_editor.active && (key==13 || key==32) && g_keyboard_focus!=PS_CTRL_NONE)
+     {
+      PS_Action(g_keyboard_focus);
+      return;
+     }
    if(!g_editor.active) return;
    PS_UIGuardEnter(g_ui);
 
@@ -1154,6 +1275,12 @@ int OnInit()
    PS_ExposureReset(g_exposure);
    PS_ExposureUIReset(g_exposure_ui);
    g_exposure_dirty=true;
+   g_panel_dirty=true;
+   g_exposure_details_dirty=true;
+   g_exposure_labels_dirty=true;
+   g_hovered_control=PS_CTRL_NONE;
+   g_pressed_control=PS_CTRL_NONE;
+   g_keyboard_focus=PS_CTRL_NONE;
    g_last_exposure_refresh_ms=0;
    g_pointer.capture=PS_CAPTURE_NONE;
    g_pointer.control=PS_CTRL_NONE;
@@ -1330,7 +1457,8 @@ void OnTimer()
      {
       g_exposure_hover_until_ms=0;
       g_exposure_ui.hovered_row=-1;
-      g_ui.dirty=true;
+      g_exposure_details_dirty=true;
+      g_exposure_labels_dirty=true;
      }
    PS_RenderIfDirty();
   }
@@ -1394,7 +1522,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
          int maximum=MathMax(0,PS_UIExposureFilteredCount(g_exposure)-PS_EXPOSURE_VISIBLE_ROWS);
          if(dparam>0.0) g_exposure_ui.scroll_offset=MathMax(0,g_exposure_ui.scroll_offset-1);
          else if(dparam<0.0) g_exposure_ui.scroll_offset=MathMin(maximum,g_exposure_ui.scroll_offset+1);
-         g_ui.dirty=true;
+         g_exposure_details_dirty=true;
          PS_RenderIfDirty();
          PS_UIGuardEnter(g_ui);
          return;
@@ -1415,6 +1543,8 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
       PS_RefreshMarket(false);
       PS_UIClampPanel(g_ui,g_model.view_mode);
       g_ui.dirty=true;
+      g_exposure_details_dirty=true;
+      g_exposure_labels_dirty=true;
       g_ui.line_dirty=true;
       PS_RenderIfDirty();
       return;

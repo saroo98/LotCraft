@@ -49,6 +49,12 @@ color PS_ThemeBackground()   { return(g_ps_light_theme ? C'226,232,239' : PS_PRE
 color PS_ThemePanel()        { return(g_ps_light_theme ? C'250,252,255' : PS_PREMIUM_PANEL); }
 color PS_ThemeSection()      { return(g_ps_light_theme ? C'244,247,251' : PS_PREMIUM_SECTION); }
 color PS_ThemeControl()      { return(g_ps_light_theme ? C'255,255,255' : PS_PREMIUM_CONTROL); }
+color PS_ThemeAction()       { return(PS_PREMIUM_BLUE); }
+color PS_ThemeLoss()         { return(g_ps_light_theme ? C'180,35,47' : C'255,122,131'); }
+color PS_ThemeProfit()       { return(g_ps_light_theme ? C'27,122,70' : C'80,211,135'); }
+color PS_ThemeIncomplete()   { return(g_ps_light_theme ? C'151,91,0' : C'242,180,72'); }
+color PS_ThemeHover()        { return(g_ps_light_theme ? C'239,245,252' : C'31,40,50'); }
+color PS_ThemePressed()      { return(g_ps_light_theme ? C'225,235,247' : C'22,29,37'); }
 color PS_ThemeField()        { return(g_ps_light_theme ? C'255,255,255' : PS_PREMIUM_FIELD); }
 color PS_ThemeBorder()       { return(g_ps_light_theme ? C'184,197,211' : PS_PREMIUM_BORDER); }
 color PS_ThemeDivider()      { return(g_ps_light_theme ? C'216,224,233' : PS_PREMIUM_DIVIDER); }
@@ -1242,9 +1248,8 @@ void PS_PremiumField(const PSUIState &ui,const PSControlId control,const string 
    PS_PremiumControlRect(ui,control,rect);
    bool focused=(editor.active && editor.field==field);
    bool selected=(focused && editor.has_selection);
-   color fill=(focused ? PS_ThemeFieldFocus() :
-                (read_only ? PS_ThemeReadOnly() : PS_ThemeField()));
-   color border=(focused ? PS_PREMIUM_BLUE : (authority ? PS_PREMIUM_BLUE : PS_ThemeBorder()));
+   color fill=(read_only ? PS_ThemeReadOnly() : PS_ThemeField());
+   color border=(focused ? PS_ThemeAction() : (authority ? PS_ThemeAction() : PS_ThemeBorder()));
    PS_PremiumRoundRect(rect.x,rect.y,rect.w,rect.h,3,fill,border);
    if(selected)
      {
@@ -1315,8 +1320,8 @@ void PS_PremiumDrawOrderMode(const PSUIState &ui,const PSModel &model)
    PS_UISetRect(right,rect.x+half+gap,rect.y,rect.w-half-gap,rect.h);
    bool instant_active=(model.order_mode==PS_ORDER_INSTANT);
    bool pending_active=(model.order_mode==PS_ORDER_PENDING);
-   PS_PremiumButton(left,"",instant_active,PS_PREMIUM_GREEN,27,true);
-   PS_PremiumButton(right,"",pending_active,PS_PREMIUM_BLUE,27,true);
+   PS_PremiumButton(left,"",instant_active,PS_ThemeAction(),27,true);
+   PS_PremiumButton(right,"",pending_active,PS_ThemeAction(),27,true);
    color instant_color=(instant_active ? PS_ThemeOnAccent() : PS_ThemeMuted());
    color pending_color=(pending_active ? PS_ThemeOnAccent() : PS_ThemeMuted());
    PS_PremiumText(left.x+left.w/2,left.y+left.h/2,"Instant",11,instant_color,
@@ -1356,9 +1361,8 @@ void PS_PremiumCompactField(const PSUIState &ui,const PSControlId control,const 
    int scaled_padding=PS_U(padding);
    bool focused=(editor.active && editor.field==field);
    bool selected=(focused && editor.has_selection);
-   color fill=(focused ? PS_ThemeFieldFocus() :
-                (read_only ? PS_ThemeReadOnly() : PS_ThemeField()));
-   color border=(focused ? PS_PREMIUM_BLUE : (authority ? PS_PREMIUM_BLUE : PS_ThemeBorder()));
+   color fill=(read_only ? PS_ThemeReadOnly() : PS_ThemeField());
+   color border=(focused ? PS_ThemeAction() : (authority ? PS_ThemeAction() : PS_ThemeBorder()));
    PS_PremiumRoundRect(rect.x,rect.y,rect.w,rect.h,4,fill,border);
    if(selected)
      {
@@ -1433,11 +1437,11 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
 
    PSRect order_rect;
    PS_PremiumControlRect(ui,PS_CTRL_ORDER_MODE,order_rect);
-   PS_PremiumButton(order_rect,"",false,PS_PREMIUM_BLUE,16,true);
+   PS_PremiumButton(order_rect,"",true,PS_ThemeAction(),16,true);
    PS_PremiumText(order_rect.x+PS_U(13),order_rect.y+order_rect.h/2,
-                    (model.order_mode==PS_ORDER_INSTANT ? "Instant" : "Pending"),11,PS_ThemeText(),
+                    (model.order_mode==PS_ORDER_INSTANT ? "Instant" : "Pending"),11,PS_ThemeOnAccent(),
                    TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
-   PS_PremiumChevronDown(order_rect.x+order_rect.w-PS_U(14),order_rect.y+order_rect.h/2,PS_ThemeMuted());
+   PS_PremiumChevronDown(order_rect.x+order_rect.w-PS_U(14),order_rect.y+order_rect.h/2,PS_ThemeOnAccent());
 
    PS_PremiumRoundRect(PS_U(8),PS_U(91),PS_U(356),PS_U(126),5,PS_ThemeSection(),PS_ThemeBorder());
    PS_PremiumText(PS_U(16),PS_U(112),"Entry",9,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
@@ -1463,8 +1467,9 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
    PS_PremiumCompactSmallControl(ui,PS_CTRL_TAKE_COPY,"C",copy_feedback_control==PS_CTRL_TAKE_COPY,21);
    PSRect compact_lines_rect;
    PS_PremiumControlRect(ui,PS_CTRL_LINES,compact_lines_rect);
-   PS_PremiumButton(compact_lines_rect,(model.lines_visible ? "Hide lines" : "Show lines"),true,
-                    (model.lines_visible ? PS_CLR_WARNING : PS_PREMIUM_GREEN),17,true);
+   PS_PremiumButton(compact_lines_rect,(model.lines_visible ? "Hide lines" : "Show lines"),
+                    !model.lines_visible,
+                    (model.lines_visible ? PS_ThemeControl() : PS_ThemeAction()),17,true);
 
    PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(106),5,PS_ThemeSection(),PS_ThemeBorder());
    PS_PremiumText(PS_U(16),PS_U(244),"Account",9,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
@@ -1616,8 +1621,9 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
                                  copy_feedback_control==PS_CTRL_TAKE_COPY,27);
    PSRect full_lines_rect;
    PS_PremiumControlRect(ui,PS_CTRL_LINES,full_lines_rect);
-   PS_PremiumButton(full_lines_rect,(model.lines_visible ? "Hide lines" : "Show lines"),true,
-                    (model.lines_visible ? PS_CLR_WARNING : PS_PREMIUM_GREEN),17,true);
+   PS_PremiumButton(full_lines_rect,(model.lines_visible ? "Hide lines" : "Show lines"),
+                    !model.lines_visible,
+                    (model.lines_visible ? PS_ThemeControl() : PS_ThemeAction()),17,true);
 
    PS_PremiumRoundRect(PS_U(10),PS_U(247),PS_U(418),PS_U(120),5,PS_ThemeSection(),PS_ThemeBorder());
    PS_PremiumText(PS_U(20),PS_U(269),"Account",10,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);

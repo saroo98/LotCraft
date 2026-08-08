@@ -155,6 +155,21 @@ def test_trade_clarity_uses_typed_issues_and_shared_currency_formatting():
     assert '"Risk, "+PS_CurrencyAdornment(market.account_currency)' in ui
 
 
+def test_focus_does_not_recolor_the_entire_field():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    assert "color fill=(read_only ? PS_ThemeReadOnly() : PS_ThemeField());" in ui
+    assert "focused ? PS_ThemeFieldFocus()" not in ui
+    assert "FillRectangle(selection_x" in ui
+
+
+def test_order_mode_and_lines_use_semantic_colors():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    assert "PS_ThemeAction()" in ui
+    assert "PS_ThemeLoss()" in ui
+    assert "PS_ThemeIncomplete()" in ui
+    assert "model.lines_visible ? PS_ThemeControl() : PS_ThemeAction()" in ui
+
+
 def test_exact_internal_interactive_control_inventory():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     body = re.search(r"enum PSControlId\s*\{(.*?)\};", types, re.S).group(1)
@@ -357,7 +372,7 @@ def test_full_and_compact_use_the_requested_short_labels():
         for old_label in ['"Stop-loss"', '"Take-profit"', '"Order type"', '"Position size"', '"Direction"', '"Type"', '"Chart levels"']:
             assert old_label not in render
         assert '(model.lines_visible ? "Hide lines" : "Show lines")' in render
-        assert '(model.lines_visible ? PS_CLR_WARNING : PS_PREMIUM_GREEN)' in render
+        assert '(model.lines_visible ? PS_ThemeControl() : PS_ThemeAction())' in render
     for glyph in ['"☷', '"ϟ', '"◷', '"•••', '"×']:
         assert glyph not in premium
 

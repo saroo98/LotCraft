@@ -1,4 +1,4 @@
-# LotCraft 1.1.0 Architecture
+# LotCraft 1.2.0 Architecture
 
 ## 1. Product boundary
 

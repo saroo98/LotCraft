@@ -1,6 +1,6 @@
 # LotCraft Symbol Transition, Pending Stability, and Marker Ownership Completion Plan
 
-Status: implemented for LotCraft 1.1.0; automated and native build gates completed, user visual acceptance pending
+Status: implemented for LotCraft 1.2.0; automated and native build gates completed, user visual acceptance pending
 
 Target: current `main` worktree at commit `6423dd2`, including the three existing uncommitted default-SL-gap changes
 

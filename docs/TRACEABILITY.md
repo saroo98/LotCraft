@@ -1,4 +1,4 @@
-# LotCraft 1.1.0 Requirements-to-Implementation Traceability
+# LotCraft 1.2.0 Requirements-to-Implementation Traceability
 
 Source authority: the supplied **Build Prompt: LotCraft v1.0.0 for MetaTrader 5**.
 
@@ -12,7 +12,7 @@ Status terms:
 
 | ID | Requirement | Implementation | Evidence/status |
 |---|---|---|---|
-| ID-01 | Product, source, compiled name, title, logs, installer, and metadata identify `LotCraft 1.1.0` | `LotCraft.mq5`, `PS_Types.mqh`, UI title, log helpers, installer constants/resources | Implemented, automated identity and PE tests |
+| ID-01 | Product, source, compiled name, title, logs, installer, and metadata identify `LotCraft 1.2.0` | `LotCraft.mq5`, `PS_Types.mqh`, UI title, log helpers, installer constants/resources | Implemented, automated identity and PE tests |
 | ID-02 | Clean implementation independent of old Position Sizer | Dedicated source tree, `LotCraft.v100` objects, `LotCraft.100` state, dedicated installer path | Implemented, automated source/installer scans |
 | ID-03 | Multiple instances do not collide | Prefix hash includes account server/login and chart ID | Implemented; native multi-chart evidence pending |
 
@@ -21,7 +21,7 @@ Status terms:
 | Prompt item | Internal control(s) | Behavior/module | Evidence/status |
 |---:|---|---|---|
 | 1 | `PS_CTRL_MANUAL` | Isolated Win32 F9 request only; no order send | Implemented; native dialog evidence pending |
-| 2 | `PS_CTRL_MINI` | Full/mini toggle, state retained and persisted | Implemented; repeated native toggle pending |
+| 2 | `PS_CTRL_FULL`, `PS_CTRL_COMPACT`, `PS_CTRL_MINI` | Persistent Full/Compact/Mini selector with the current mode selected; state retained and persisted | Implemented; repeated native mode selection pending |
 | 3 | `PS_CTRL_CLOSE` | `ExpertRemove()` only | Implemented; native cleanup evidence pending |
 | 4 | `PS_CTRL_DIRECTION` | Long/Short transition preserves distances and recalculates | Implemented, calculation tests; native UI pending |
 | 5 | `PS_CTRL_ENTRY_FIELD` | Custom keyboard editor; Instant market-bound, Pending durable | Implemented, editor/source tests; native keyboard pending |
@@ -135,8 +135,8 @@ Status terms:
 | ART-06 | Test plan/evidence | `docs/TEST_PLAN.md`, `docs/TEST_EVIDENCE.md` | Delivered; native sections pending |
 | ART-07 | Known limitations | `docs/KNOWN_LIMITATIONS.md` | Delivered |
 | ART-08 | Clean compiled EX5 | `MQL5/Experts/LotCraft/LotCraft.ex5` | Produced by Darwinex MetaEditor, `0 errors, 0 warnings` |
-| ART-09 | Windows installer | `build/LotCraft-1.1.0-Setup.exe` | Rebuilt and PE-tested; local installation is part of the release gate |
-| ART-10 | Four required SHA-256 hashes | `release/LotCraft-1.1.0/RELEASE-VERIFICATION.json`, release verifier outputs | Canonical, staged, and installed EX5 hashes must match; installer hash recorded |
+| ART-09 | Windows installer | `build/LotCraft-1.2.0-Setup.exe` | Rebuilt and PE-tested; local installation is part of the release gate |
+| ART-10 | Four required SHA-256 hashes | `release/LotCraft-1.2.0/RELEASE-VERIFICATION.json`, release verifier outputs | Canonical, staged, and installed EX5 hashes must match; installer hash recorded |
 | PKG-01 | Dedicated safe install/upgrade/uninstall | Go installer and manifest | Automated policy/PE evidence plus Windows clean-install, upgrade, protected-refusal, and uninstall smoke passes |
 | PKG-02 | No source in end-user installer | installer owns only EX5, uninstaller, manifest | Implemented, automated test |
 

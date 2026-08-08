@@ -468,6 +468,39 @@ void PS_ExposureUIReset(PSExposureUIState &state)
    state.hovered_row=-1;
   }
 
+void PS_CopyExposureSnapshot(PSExposureSnapshot &destination,const PSExposureSnapshot &source)
+  {
+   int count=ArraySize(source.items);
+   ArrayResize(destination.items,count);
+   for(int i=0;i<count;i++)
+     {
+      destination.items[i].kind=source.items[i].kind;
+      destination.items[i].status=source.items[i].status;
+      destination.items[i].ticket=source.items[i].ticket;
+      destination.items[i].symbol=source.items[i].symbol;
+      destination.items[i].direction=source.items[i].direction;
+      destination.items[i].volume=source.items[i].volume;
+      destination.items[i].entry=source.items[i].entry;
+      destination.items[i].stop_loss=source.items[i].stop_loss;
+      destination.items[i].projected_result=source.items[i].projected_result;
+      destination.items[i].loss_money=source.items[i].loss_money;
+      destination.items[i].loss_percent=source.items[i].loss_percent;
+     }
+   destination.equity_basis=source.equity_basis;
+   destination.chart_loss_money=source.chart_loss_money;
+   destination.account_loss_money=source.account_loss_money;
+   destination.chart_loss_percent=source.chart_loss_percent;
+   destination.account_loss_percent=source.account_loss_percent;
+   destination.chart_protected=source.chart_protected;
+   destination.account_protected=source.account_protected;
+   destination.chart_no_sl=source.chart_no_sl;
+   destination.account_no_sl=source.account_no_sl;
+   destination.chart_unavailable=source.chart_unavailable;
+   destination.account_unavailable=source.account_unavailable;
+   destination.fingerprint=source.fingerprint;
+   destination.calculated_at_ms=source.calculated_at_ms;
+  }
+
 // Explicit copies avoid compiler-version-dependent implicit copy construction for
 // structures that contain strings or nested trade structures.
 void PS_CopyMqlTick(MqlTick &destination,const MqlTick &source)

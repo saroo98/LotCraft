@@ -15,6 +15,8 @@ PSCalcResult     g_calc;
 PSEditorState    g_editor;
 PSPointerState   g_pointer;
 PSUIState        g_ui;
+PSExposureSnapshot g_exposure;
+PSExposureUIState  g_exposure_ui;
 
 string g_persistence_base="";
 bool   g_initialized=false;
@@ -22,6 +24,7 @@ bool   g_trade_in_flight=false;
 bool   g_shift_down=false;
 bool   g_ctrl_down=false;
 ulong  g_last_market_refresh_ms=0;
+ulong  g_last_exposure_refresh_ms=0;
 ulong  g_last_line_lock_ms=0;
 ulong  g_last_submit_ms=0;
 ulong  g_status_until_ms=0;
@@ -37,6 +40,7 @@ bool   g_pointer_motion_pending=false;
 int    g_pointer_motion_x=0;
 int    g_pointer_motion_y=0;
 bool   g_update_check_launched=false;
+bool   g_exposure_dirty=true;
 ulong  g_update_check_start_ms=0;
 PSFieldId g_last_editor_click_field=PS_FIELD_NONE;
 PSControlId g_copy_feedback_control=PS_CTRL_NONE;
@@ -46,6 +50,34 @@ const int PS_HANDLE_DRAG_THRESHOLD_PX=3;
 const int PS_POINTER_TIMER_MS=8;
 
 void PS_UpdateInteractionGuard(const int x,const int y);
+
+void PS_RefreshExposure(const bool force=false)
+  {
+   if(!g_initialized || g_symbol_transition_pending) return;
+   ulong now=GetTickCount64();
+   if(!force && !g_exposure_dirty && now-g_last_exposure_refresh_ms<1000) return;
+
+   PSExposureSnapshot next;
+   PS_ExposureReset(next);
+   string error="";
+   if(!PS_ExposureCalculate(next,_Symbol,AccountInfoDouble(ACCOUNT_EQUITY),error))
+     {
+      g_last_exposure_refresh_ms=now;
+      g_exposure_dirty=true;
+      PS_LogWarningRateLimited("exposure.refresh",error,5000);
+      return;
+     }
+
+   bool changed=PS_ExposureMeaningfullyChanged(g_exposure,next,g_market.currency_digits);
+   PS_CopyExposureSnapshot(g_exposure,next);
+   g_last_exposure_refresh_ms=now;
+   g_exposure_dirty=false;
+   if(changed)
+     {
+      g_ui.dirty=true;
+      g_ui.line_dirty=true;
+     }
+  }
 
 void PS_SetStatus(const string text,const bool is_error,const ulong duration_ms=5000)
   {
@@ -104,6 +136,7 @@ void PS_Recalculate(const bool clear_status=false)
 void PS_RefreshMarket(const bool clear_status=false)
   {
    string previous_symbol=g_active_symbol;
+   bool transition_completed=false;
    PSMarketSnapshot refreshed;
    PS_MarketAcquire(refreshed);
    bool symbol_changed=(previous_symbol!="" && refreshed.symbol!="" &&
@@ -120,6 +153,8 @@ void PS_RefreshMarket(const bool clear_status=false)
          g_symbol_transition_pending=false;
          g_transition_target_symbol="";
          g_active_symbol=refreshed.symbol;
+         g_exposure_dirty=true;
+         transition_completed=true;
          PS_SetStatus("Entry and planning levels were fitted to "+refreshed.symbol+".",false,3000);
         }
       else
@@ -149,12 +184,15 @@ void PS_RefreshMarket(const bool clear_status=false)
          g_symbol_transition_pending=false;
          g_transition_target_symbol="";
          g_active_symbol=refreshed.symbol;
+         g_exposure_dirty=true;
+         transition_completed=true;
         }
       else PS_ModelEnsureInitialPrices(g_model,g_market);
      }
    if(g_active_symbol=="") g_active_symbol=refreshed.symbol;
    g_last_market_refresh_ms=GetTickCount64();
    PS_Recalculate(clear_status);
+   if(transition_completed) PS_RefreshExposure(true);
   }
 
 void PS_RenderIfDirty()
@@ -1006,6 +1044,10 @@ int OnInit()
    ZeroMemory(g_ui);
    ZeroMemory(g_pointer);
    PS_EditorReset(g_editor);
+   PS_ExposureReset(g_exposure);
+   PS_ExposureUIReset(g_exposure_ui);
+   g_exposure_dirty=true;
+   g_last_exposure_refresh_ms=0;
    g_pointer.capture=PS_CAPTURE_NONE;
    g_pointer.control=PS_CTRL_NONE;
 
@@ -1062,6 +1104,7 @@ int OnInit()
      }
    else
      {
+      PS_RefreshExposure(true);
       PS_Recalculate(false);
       PS_RenderIfDirty();
      }
@@ -1159,6 +1202,8 @@ void OnTimer()
                         g_pointer.capture==PS_CAPTURE_HANDLE_STOP ||
                         g_pointer.capture==PS_CAPTURE_HANDLE_TAKE);
    if(!motion_capture && now-g_last_market_refresh_ms>=250) PS_RefreshMarket(false);
+   if(!motion_capture && (g_exposure_dirty || now-g_last_exposure_refresh_ms>=1000))
+      PS_RefreshExposure(false);
    if(now-g_last_line_lock_ms>=1000)
      {
       PS_UIApplyLineLock(g_ui,"line.entry");
@@ -1180,6 +1225,7 @@ void OnTimer()
 void OnTrade()
   {
    if(!g_initialized) return;
+   g_exposure_dirty=true;
    PS_RefreshMarket(false);
    PS_RenderIfDirty();
   }
@@ -1187,6 +1233,7 @@ void OnTrade()
 void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &request,const MqlTradeResult &result)
   {
    if(!g_initialized) return;
+   g_exposure_dirty=true;
    if(trans.symbol==_Symbol)
      {
       PS_RefreshMarket(false);

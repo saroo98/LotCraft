@@ -117,6 +117,16 @@ def test_exposure_engine_uses_broker_profit_calculation_and_tracks_incomplete_ro
         assert token in source
 
 
+def test_exposure_refresh_is_event_driven_and_not_on_pointer_motion():
+    main = MAIN.read_text(encoding="utf-8")
+    assert "void OnTradeTransaction(" in main
+    assert "g_exposure_dirty=true;" in main
+    assert "now-g_last_exposure_refresh_ms>=1000" in main
+    assert "void PS_CopyExposureSnapshot" in (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
+    pointer = main[main.index("void PS_MouseMoveCaptured"):main.index("void PS_MouseRelease")]
+    assert "PS_ExposureCalculate" not in pointer
+
+
 def test_exact_internal_interactive_control_inventory():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     body = re.search(r"enum PSControlId\s*\{(.*?)\};", types, re.S).group(1)

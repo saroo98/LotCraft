@@ -127,6 +127,18 @@ def test_exposure_refresh_is_event_driven_and_not_on_pointer_motion():
     assert "PS_ExposureCalculate" not in pointer
 
 
+def test_ui_uses_shared_dpi_metrics_and_symmetric_controls():
+    metrics = (SRC / "PS_UI_Metrics.mqh").read_text(encoding="utf-8")
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    assert "TERMINAL_SCREEN_DPI" in metrics
+    assert "double dpi_scale;" in metrics
+    assert "double fit_scale;" in metrics
+    assert "int PS_U(const int base_px)" in metrics
+    assert '#include "PS_UI_Metrics.mqh"' in ui
+    assert "const int small_control_w=PS_U(38);" in ui
+    assert "const int action_w=(content_w-action_gap)/2;" in ui
+
+
 def test_exact_internal_interactive_control_inventory():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     body = re.search(r"enum PSControlId\s*\{(.*?)\};", types, re.S).group(1)
@@ -160,14 +172,18 @@ def test_required_user_facing_control_text_is_present():
 
 def test_compact_full_panel_omits_unneeded_summary_and_commission_rows():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    metrics = (SRC / "PS_UI_Metrics.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
     layout = re.search(r"void PS_UILayout.*?\n  \}", ui, re.S).group(0)
     render = re.search(r"void PS_UIRender\(.*?\n  \}", ui, re.S).group(0)
     init = re.search(r"int OnInit\(\).*?\n  \}", main, re.S).group(0)
 
-    assert "ui.panel_w=390;" in ui and "ui.panel_h=92;" in ui
-    assert "ui.panel_w=372;" in ui and "ui.panel_h=419;" in ui
-    assert "ui.panel_w=438;" in ui and "ui.panel_h=469;" in ui
+    assert "g_ps_metrics.mini_w=PS_U(360);" in metrics
+    assert "g_ps_metrics.mini_h=PS_U(92);" in metrics
+    assert "g_ps_metrics.compact_w=PS_U(372);" in metrics
+    assert "g_ps_metrics.compact_h=PS_U(459);" in metrics
+    assert "g_ps_metrics.full_w=PS_U(438);" in metrics
+    assert "g_ps_metrics.full_h=PS_U(517);" in metrics
     assert "PS_CTRL_COMMISSION_MODE" not in layout
     assert "PS_CTRL_COMMISSION_FIELD" not in layout
     assert "PS_CTRL_ACTUAL_PERCENT" not in layout
@@ -261,27 +277,27 @@ def test_level_lines_are_painted_behind_the_interface():
 
 def test_top_row_uses_direct_symmetric_controls_without_redundant_labels():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
-    assert "PS_CTRL_DIRECTION],x+20,y+54,190,34" in ui
-    assert "PS_CTRL_ORDER_MODE],x+228,y+54,190,34" in ui
+    assert "PS_CTRL_DIRECTION],x+PS_U(20),y+PS_U(54),PS_U(190),PS_U(34)" in ui
+    assert "PS_CTRL_ORDER_MODE],x+PS_U(228),y+PS_U(54),PS_U(190),PS_U(34)" in ui
     assert 'PS_PremiumText(227,76,"Type"' not in ui
     assert 'PS_PremiumText(20,76,"Direction"' not in ui
-    assert "const int gap=8;" in ui
+    assert "const int gap=PS_U(8);" in ui
 
 
 def test_full_mode_uses_one_inset_grid_without_touching_or_crossing_borders():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     for geometry in [
-        "PS_CTRL_LINES],x+20,y+213,120,22",
-        "PS_CTRL_ACCOUNT_MODE],x+92,y+255,121,28",
-        "PS_CTRL_ACCOUNT_FIELD],x+219,y+255,199,28",
-        "PS_CTRL_RISK_PERCENT_FIELD],x+92,y+291,121,28",
-        "PS_CTRL_RISK_MONEY_FIELD],x+291,y+291,127,28",
-        "PS_CTRL_POSITION_SIZE],x+92,y+327,281,28",
-        "PS_CTRL_POSITION_COPY],x+379,y+327,39,28",
-        "PS_CTRL_TRADE],x+10,y+419,418,40",
+        "PS_CTRL_LINES],x+PS_U(20),y+PS_U(213),PS_U(120),PS_U(22)",
+        "PS_CTRL_ACCOUNT_MODE],x+PS_U(92),y+PS_U(255),PS_U(121),PS_U(28)",
+        "PS_CTRL_ACCOUNT_FIELD],x+PS_U(219),y+PS_U(255),PS_U(199),PS_U(28)",
+        "PS_CTRL_RISK_PERCENT_FIELD],x+PS_U(92),y+PS_U(291),PS_U(121),PS_U(28)",
+        "PS_CTRL_RISK_MONEY_FIELD],x+PS_U(291),y+PS_U(291),PS_U(127),PS_U(28)",
+        "PS_CTRL_POSITION_SIZE],x+PS_U(92),y+PS_U(327),PS_U(281),PS_U(28)",
+        "PS_CTRL_POSITION_COPY],x+PS_U(379),y+PS_U(327),PS_U(39),PS_U(28)",
+        "PS_CTRL_TRADE],content_x,y+PS_U(419),content_w,PS_U(40)",
     ]:
         assert geometry in ui
-    assert "ui.panel_h=469;" in ui
+    assert "g_ps_metrics.full_h" in ui
     assert "g_ps_panel_canvas.Line(11,338" not in ui
     assert "g_ps_panel_canvas.Line(11,382" not in ui
     assert "g_ps_panel_canvas.Line(224,339" not in ui
@@ -294,12 +310,12 @@ def test_full_mode_uses_compact_visual_language_without_decorative_control_icons
     assert 'PS_PremiumControlButton(ui,PS_CTRL_MANUAL,"Manual"' in full
     assert 'PS_PremiumControlButton(ui,PS_CTRL_COMPACT,"Compact"' in full
     assert 'PS_PremiumControlButton(ui,PS_CTRL_MINI,"Mini"' in full
-    assert 'PS_PremiumRoundRect(10,47,418,48' in full
-    assert 'PS_PremiumRoundRect(10,102,418,139' in full
-    assert 'PS_PremiumRoundRect(10,247,418,120' in full
+    assert 'PS_PremiumRoundRect(PS_U(10),PS_U(47),PS_U(418),PS_U(48)' in full
+    assert 'PS_PremiumRoundRect(PS_U(10),PS_U(102),PS_U(418),PS_U(139)' in full
+    assert 'PS_PremiumRoundRect(PS_U(10),PS_U(247),PS_U(418),PS_U(120)' in full
     assert "PS_PremiumCompactField(ui,PS_CTRL_ENTRY_FIELD" in full
     assert "PS_PremiumRoundRect(10,488,436,27" not in full
-    assert "PS_CTRL_TRADE],x+10,y+419,418,40" in ui
+    assert "PS_CTRL_TRADE],content_x,y+PS_U(419),content_w,PS_U(40)" in ui
     for token in [
         "PS_PremiumLogo(",
         "PS_PremiumSlidersIcon(",
@@ -521,22 +537,21 @@ def test_compact_geometry_is_materially_smaller_and_single_canvas_renderer_is_pr
     compact = re.search(r"void PS_PremiumRenderCompact.*?\n  \}", ui, re.S).group(0)
     premium = re.search(r"void PS_UIPremiumRender.*?\n  \}", ui, re.S).group(0)
 
-    for geometry in [
-        "x+154,y+6,61,28", "x+218,y+6,38,28", "x+261,y+6,38,28",
-        "x+304,y+6,26,28", "x+335,y+6,27,28",
-        "x+16,y+51,166,26", "x+190,y+51,166,26",
-        "int compact_row=99;", "x+75,y+compact_row,157,26", "x+238,y+compact_row,30,26",
-        "x+274,y+compact_row,32,26", "x+312,y+compact_row,43,26",
-        "x+16,y+189,112,22",
-        "x+75,y+231,101,26", "x+182,y+231,173,26",
-        "x+75,y+261,101,26", "x+261,y+261,94,26",
-        "x+75,y+291,237,26", "x+318,y+291,37,26",
-        "x+8,y+337,174,32", "x+188,y+337,176,32", "x+8,y+377,356,34",
+    assert not re.search(r"(?:x|y)\+\d+", layout)
+    for control in [
+        "PS_CTRL_MANUAL", "PS_CTRL_COMPACT", "PS_CTRL_MINI", "PS_CTRL_THEME", "PS_CTRL_CLOSE",
+        "PS_CTRL_DIRECTION", "PS_CTRL_ORDER_MODE", "PS_CTRL_ENTRY_FIELD", "PS_CTRL_STOP_FIELD",
+        "PS_CTRL_TAKE_FIELD", "PS_CTRL_LINES", "PS_CTRL_ACCOUNT_MODE", "PS_CTRL_ACCOUNT_FIELD",
+        "PS_CTRL_RISK_PERCENT_FIELD", "PS_CTRL_RISK_MONEY_FIELD", "PS_CTRL_POSITION_SIZE",
+        "PS_CTRL_POSITION_COPY", "PS_CTRL_CONFIRM", "PS_CTRL_MOVE_SLS", "PS_CTRL_TRADE",
     ]:
-        assert geometry in layout
+        assert control in layout
+    assert "const int small_control_w=PS_U(38);" in layout
+    assert "const int action_w=(content_w-action_gap)/2;" in layout
     for geometry in [
-        "PS_PremiumRoundRect(8,43,356,42", "PS_PremiumRoundRect(8,91,356,126",
-        "PS_PremiumRoundRect(8,223,356,106",
+        "PS_PremiumRoundRect(PS_U(8),PS_U(43),PS_U(356),PS_U(42)",
+        "PS_PremiumRoundRect(PS_U(8),PS_U(91),PS_U(356),PS_U(126)",
+        "PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(106)",
     ]:
         assert geometry in compact
     assert "g_ps_panel_canvas.Line(9,278" not in compact
@@ -548,7 +563,7 @@ def test_compact_geometry_is_materially_smaller_and_single_canvas_renderer_is_pr
     assert "OBJ_RECTANGLE_LABEL" not in compact
     assert "ChartRedraw" not in compact
     assert 'PS_PremiumControlButton(ui,PS_CTRL_MANUAL,"Manual",false,PS_PREMIUM_BLUE,19);' in compact
-    assert 'PS_PremiumText(14,21,PS_PRODUCT_NAME,13' in compact
+    assert 'PS_PremiumText(PS_U(14),PS_U(21),PS_PRODUCT_NAME,13' in compact
     assert 'PS_PremiumText(16,70,"Direction",9' not in compact
     assert 'editor,PS_FIELD_ENTRY,false,false,11,12);' in compact
     assert 'PS_PremiumText(trade_rect.x+trade_rect.w/2,trade_rect.y+trade_rect.h/2,trade_text,13' in compact
@@ -577,11 +592,11 @@ def test_mini_mode_edits_risk_percentage_and_offers_full_and_compact_navigation(
     layout = re.search(r"void PS_UILayout.*?\n  \}", ui, re.S).group(0)
     mini = re.search(r"void PS_PremiumRenderMini.*?\n  \}", ui, re.S).group(0)
 
-    assert "PS_CTRL_RISK_PERCENT_FIELD],x+72,y+52,82,28" in layout
+    assert "PS_CTRL_RISK_PERCENT_FIELD],x+PS_U(72),y+PS_U(52),PS_U(82),PS_U(28)" in layout
     assert "g_ps_control_visible[PS_CTRL_RISK_PERCENT_FIELD]=true;" in layout
     mini_layout = layout.split("if(view_mode==PS_VIEW_MINI)", 1)[1].split("if(view_mode==PS_VIEW_COMPACT)", 1)[0]
     assert "g_ps_control_visible[PS_CTRL_POSITION_SIZE]" not in mini_layout
-    assert 'PS_PremiumText(12,66,"Risk, %"' in mini
+    assert 'PS_PremiumText(PS_U(12),PS_U(66),"Risk, %"' in mini
     assert "PS_PremiumCompactField(ui,PS_CTRL_RISK_PERCENT_FIELD" in mini
     assert 'PS_PremiumControlButton(ui,PS_CTRL_MINI,"Full"' in mini
     assert 'PS_PremiumControlButton(ui,PS_CTRL_COMPACT,"Compact"' in mini
@@ -625,7 +640,11 @@ def test_all_canvas_vcenter_text_uses_one_optical_alignment_correction():
 def test_theme_control_is_visible_in_full_compact_and_mini_modes():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     layout = re.search(r"void PS_UILayout.*?\n  \}", ui, re.S).group(0)
-    for geometry in ["x+328,y+7,25,28", "x+304,y+6,26,28", "x+366,y+7,27,30"]:
+    for geometry in [
+        "x+PS_U(294),y+PS_U(7),PS_U(27),PS_U(28)",
+        "x+PS_U(304),y+PS_U(6),PS_U(26),PS_U(28)",
+        "x+PS_U(366),y+PS_U(7),PS_U(27),PS_U(30)",
+    ]:
         assert geometry in layout
     assert "g_ps_control_visible[PS_CTRL_THEME]=true;" in layout
 

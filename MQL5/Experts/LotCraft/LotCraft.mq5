@@ -909,6 +909,31 @@ void PS_MousePress(const int x,const int y)
       return;
      }
 
+   int label_item_index=PS_UIExposureLabelHitTest(x,y);
+   if(label_item_index>=0)
+     {
+      if(g_editor.active && !PS_CommitEditor())
+        {
+         PS_PerfCheck("pointer",started,PS_POINTER_BUDGET_US);
+         return;
+        }
+      int filtered_index=0;
+      for(int i=0;i<label_item_index;i++)
+         if(g_exposure.items[i].symbol==_Symbol) filtered_index++;
+      g_exposure_ui.details_open=true;
+      g_exposure_ui.scope=PS_EXPOSURE_SCOPE_CHART;
+      int maximum=MathMax(0,PS_UIExposureFilteredCount(g_exposure)-PS_EXPOSURE_VISIBLE_ROWS);
+      g_exposure_ui.scroll_offset=PS_ClampInt(filtered_index-3,0,maximum);
+      g_exposure_ui.hovered_row=label_item_index;
+      g_exposure_hover_until_ms=GetTickCount64()+1500;
+      g_ui.dirty=true;
+      PS_SaveState();
+      PS_RenderIfDirty();
+      PS_UIGuardEnter(g_ui);
+      PS_PerfCheck("pointer",started,PS_POINTER_BUDGET_US);
+      return;
+     }
+
    if(g_editor.active) PS_CommitEditor();
    PS_UpdateInteractionGuard(x,y);
    PS_PerfCheck("pointer",started,PS_POINTER_BUDGET_US);

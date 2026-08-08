@@ -230,6 +230,25 @@ def test_exposure_sidecar_persists_preferences_not_financial_data():
         assert forbidden not in persistence
 
 
+def test_chart_exposure_labels_use_one_canvas_and_positions_only():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    assert "CCanvas g_ps_exposure_labels_canvas;" in ui
+    assert "item.kind!=PS_EXPOSURE_POSITION" in ui
+    assert "item.symbol!=_Symbol" in ui
+    assert "item.status!=PS_EXPOSURE_VALID" in ui
+    assert "ChartTimePriceToXY" in ui
+    render = ui[ui.index("void PS_UIExposureLabelsRender"):ui.index("int PS_UIExposureLabelHitTest")]
+    assert "ObjectsDeleteAll" not in render
+
+
+def test_chart_exposure_label_click_keeps_handle_precedence():
+    main = MAIN.read_text(encoding="utf-8")
+    press = re.search(r"void PS_MousePress.*?\n  \}", main, re.S).group(0)
+    assert press.index("PS_UIHitHandle") < press.index("PS_UIExposureLabelHitTest")
+    assert "g_exposure_ui.details_open=true;" in main
+    assert "g_exposure_ui.scope=PS_EXPOSURE_SCOPE_CHART;" in main
+
+
 def test_required_user_facing_control_text_is_present():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")

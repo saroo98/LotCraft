@@ -93,6 +93,13 @@ const int PS_EXPOSURE_VISIBLE_ROWS=8;
 CCanvas g_ps_exposure_canvas;
 bool    g_ps_exposure_canvas_created=false;
 string  g_ps_exposure_canvas_name="";
+#define PS_EXPOSURE_LABEL_MAX 128
+CCanvas g_ps_exposure_labels_canvas;
+bool    g_ps_exposure_labels_canvas_created=false;
+string  g_ps_exposure_labels_canvas_name="";
+PSRect  g_ps_exposure_label_rects[PS_EXPOSURE_LABEL_MAX];
+int     g_ps_exposure_label_item_indexes[PS_EXPOSURE_LABEL_MAX];
+int     g_ps_exposure_label_count=0;
 
 string PS_UIName(const PSUIState &ui,const string suffix)
   {
@@ -1022,6 +1029,47 @@ bool PS_UIExposureCanvasEnsure(const PSUIState &ui,const PSRect &rect)
    return(true);
   }
 
+void PS_UIExposureLabelsCanvasDestroy()
+  {
+   if(g_ps_exposure_labels_canvas_created) g_ps_exposure_labels_canvas.Destroy();
+   g_ps_exposure_labels_canvas_created=false;
+   g_ps_exposure_labels_canvas_name="";
+   g_ps_exposure_label_count=0;
+  }
+
+bool PS_UIExposureLabelsCanvasEnsure(const PSUIState &ui)
+  {
+   string name=PS_UIName(ui,"exposure.labels.canvas");
+   if(g_ps_exposure_labels_canvas_created && g_ps_exposure_labels_canvas_name!=name)
+      PS_UIExposureLabelsCanvasDestroy();
+   if(!g_ps_exposure_labels_canvas_created)
+     {
+      if(!g_ps_exposure_labels_canvas.CreateBitmapLabel(ChartID(),0,name,0,0,ui.chart_w,ui.chart_h,
+                                                        COLOR_FORMAT_ARGB_NORMALIZE))
+        {
+         PS_LogError(StringFormat("Cannot create exposure labels canvas %s (error %d).",name,GetLastError()));
+         return(false);
+        }
+      g_ps_exposure_labels_canvas_created=true;
+      g_ps_exposure_labels_canvas_name=name;
+      ObjectSetInteger(ChartID(),name,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(ChartID(),name,OBJPROP_SELECTED,false);
+      ObjectSetInteger(ChartID(),name,OBJPROP_HIDDEN,true);
+      ObjectSetInteger(ChartID(),name,OBJPROP_BACK,false);
+      ObjectSetInteger(ChartID(),name,OBJPROP_ZORDER,45000);
+      ObjectSetString(ChartID(),name,OBJPROP_TOOLTIP,"\n");
+     }
+   else if(g_ps_exposure_labels_canvas.Width()!=ui.chart_w ||
+           g_ps_exposure_labels_canvas.Height()!=ui.chart_h)
+     {
+      if(!g_ps_exposure_labels_canvas.Resize(ui.chart_w,ui.chart_h)) return(false);
+     }
+   ObjectSetInteger(ChartID(),name,OBJPROP_XDISTANCE,0);
+   ObjectSetInteger(ChartID(),name,OBJPROP_YDISTANCE,0);
+   ObjectSetInteger(ChartID(),name,OBJPROP_TIMEFRAMES,OBJ_ALL_PERIODS);
+   return(true);
+  }
+
 string PS_UITradeText(const PSModel &model,const PSCalcResult &calc,
                       const PSMarketSnapshot &market,const bool mini)
   {
@@ -1725,6 +1773,160 @@ PSExposureHit PS_UIExposureHitTest(const int x,const int y,int &row_index)
    return(PS_EXPOSURE_HIT_NONE);
   }
 
+bool PS_UIRectIntersects(const PSRect &a,const PSRect &b)
+  {
+   return(a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y);
+  }
+
+bool PS_UIHorizontalLaneIntersects(const int x,const int w,const PSRect &rect)
+  {
+   return(rect.w>0 && x<rect.x+rect.w && x+w>rect.x);
+  }
+
+uint PS_UIExposureARGB(const color value)
+  {
+   return(ColorToARGB(value,255));
+  }
+
+void PS_UIExposureLabelsText(const int x,const int y,const string value,const int size,
+                             const color clr,const uint alignment=TA_LEFT|TA_VCENTER,
+                             const string font="Segoe UI")
+  {
+   g_ps_exposure_labels_canvas.FontSet(font,-10*PS_Font(size));
+   g_ps_exposure_labels_canvas.TextOut(x,y-PS_PremiumOpticalCenterOffset(size),value,
+                                       PS_UIExposureARGB(clr),alignment);
+  }
+
+void PS_UIExposureLabelsRender(PSUIState &ui,const PSExposureSnapshot &exposure,
+                               const PSMarketSnapshot &market)
+  {
+   g_ps_exposure_label_count=0;
+   if(!PS_UIExposureLabelsCanvasEnsure(ui)) return;
+   g_ps_exposure_labels_canvas.Erase(0x00000000);
+   if(!g_exposure_ui.chart_labels_visible)
+     {
+      g_ps_exposure_labels_canvas.Update(false);
+      return;
+     }
+
+   int item_indexes[PS_EXPOSURE_LABEL_MAX];
+   int actual_y[PS_EXPOSURE_LABEL_MAX];
+   int display_y[PS_EXPOSURE_LABEL_MAX];
+   int count=0;
+   datetime anchor=iTime(_Symbol,_Period,0);
+   for(int i=0;i<ArraySize(exposure.items) && count<PS_EXPOSURE_LABEL_MAX;i++)
+     {
+      PSExposureItem item;
+      PS_ExposureCopyItem(item,exposure.items[i]);
+      if(item.kind!=PS_EXPOSURE_POSITION || item.symbol!=_Symbol ||
+         item.status!=PS_EXPOSURE_VALID || !PS_IsPositiveFinite(item.stop_loss)) continue;
+      int point_x=0;
+      int point_y=0;
+      if(!ChartTimePriceToXY(ChartID(),0,anchor,item.stop_loss,point_x,point_y)) continue;
+      if(point_y<0 || point_y>=ui.chart_h) continue;
+      int insert=count;
+      while(insert>0)
+        {
+         int previous=item_indexes[insert-1];
+         if(actual_y[insert-1]<point_y ||
+            (actual_y[insert-1]==point_y && exposure.items[previous].ticket<item.ticket)) break;
+         item_indexes[insert]=item_indexes[insert-1];
+         actual_y[insert]=actual_y[insert-1];
+         insert--;
+        }
+      item_indexes[insert]=i;
+      actual_y[insert]=point_y;
+      count++;
+     }
+   if(count==0)
+     {
+      g_ps_exposure_labels_canvas.Update(false);
+      return;
+     }
+
+   int label_w=PS_U(126);
+   int label_h=PS_U(20);
+   int label_x=ui.chart_w-PS_U(190);
+   PSRect panel;
+   PS_UISetRect(panel,ui.panel_x,ui.panel_y,ui.panel_w,ui.panel_h);
+   bool lane_blocked=PS_UIHorizontalLaneIntersects(label_x,label_w,panel) ||
+                     (g_exposure_ui.details_open &&
+                      PS_UIHorizontalLaneIntersects(label_x,label_w,g_exposure_ui.sidecar_rect));
+   if(lane_blocked)
+     {
+      int alternatives[3];
+      alternatives[0]=ui.panel_x-label_w-PS_U(8);
+      alternatives[1]=ui.panel_x+ui.panel_w+PS_U(8);
+      alternatives[2]=PS_U(8);
+      for(int lane=0;lane<3;lane++)
+        {
+         int candidate=alternatives[lane];
+         if(candidate<PS_U(4) || candidate+label_w>ui.chart_w-PS_U(58)) continue;
+         if(PS_UIHorizontalLaneIntersects(candidate,label_w,panel)) continue;
+         if(g_exposure_ui.details_open &&
+            PS_UIHorizontalLaneIntersects(candidate,label_w,g_exposure_ui.sidecar_rect)) continue;
+         label_x=candidate;
+         lane_blocked=false;
+         break;
+        }
+     }
+   label_x=PS_ClampInt(label_x,PS_U(4),MathMax(PS_U(4),ui.chart_w-label_w-PS_U(58)));
+
+   int spacing=PS_U(22);
+   int min_center=PS_U(12);
+   int max_center=MathMax(min_center,ui.chart_h-PS_U(12));
+   for(int i=0;i<count;i++)
+      display_y[i]=(i==0 ? MathMax(actual_y[i],min_center)
+                         : MathMax(actual_y[i],display_y[i-1]+spacing));
+   if(display_y[count-1]>max_center)
+     {
+      display_y[count-1]=max_center;
+      for(int i=count-2;i>=0;i--)
+         display_y[i]=MathMin(display_y[i],display_y[i+1]-spacing);
+     }
+   for(int i=0;i<count;i++) display_y[i]=PS_ClampInt(display_y[i],min_center,max_center);
+
+   for(int i=0;i<count;i++)
+     {
+      int item_index=item_indexes[i];
+      PSExposureItem item;
+      PS_ExposureCopyItem(item,exposure.items[item_index]);
+      int top=display_y[i]-label_h/2;
+      PSRect rect;
+      PS_UISetRect(rect,label_x,top,label_w,label_h);
+      g_ps_exposure_label_rects[g_ps_exposure_label_count]=rect;
+      g_ps_exposure_label_item_indexes[g_ps_exposure_label_count]=item_index;
+      g_ps_exposure_label_count++;
+      if(MathAbs(display_y[i]-actual_y[i])>PS_U(2))
+         g_ps_exposure_labels_canvas.Line(label_x-PS_U(6),actual_y[i],label_x,display_y[i],
+                                          PS_UIExposureARGB(PS_ThemeMuted()));
+      color border=(g_exposure_ui.hovered_row==item_index ? PS_ThemeAction() : PS_ThemeBorder());
+      g_ps_exposure_labels_canvas.FillRectangle(rect.x,rect.y,rect.x+rect.w-1,rect.y+rect.h-1,
+                                                 PS_UIExposureARGB(PS_ThemeControl()));
+      g_ps_exposure_labels_canvas.Rectangle(rect.x,rect.y,rect.x+rect.w-1,rect.y+rect.h-1,
+                                             PS_UIExposureARGB(border));
+      string side=(item.direction==PS_DIRECTION_LONG ? "B" : "S");
+      color side_color=(item.direction==PS_DIRECTION_LONG ? PS_PREMIUM_GREEN : PS_CLR_SHORT);
+      PS_UIExposureLabelsText(rect.x+PS_U(8),rect.y+rect.h/2,side,8,side_color,
+                              TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
+      PS_UIExposureLabelsText(rect.x+PS_U(22),rect.y+rect.h/2,DoubleToString(item.volume,2),8,
+                              PS_ThemeMuted(),TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
+      color result_color=(item.projected_result>0.0 ? PS_ThemeProfit() : PS_ThemeLoss());
+      PS_UIExposureLabelsText(rect.x+rect.w-PS_U(7),rect.y+rect.h/2,
+                              PS_UIExposureProjectedMoney(item,market),8,result_color,
+                              TA_RIGHT|TA_VCENTER,"Segoe UI Semibold");
+     }
+   g_ps_exposure_labels_canvas.Update(false);
+  }
+
+int PS_UIExposureLabelHitTest(const int x,const int y)
+  {
+   for(int i=0;i<g_ps_exposure_label_count;i++)
+      if(PS_RectContains(g_ps_exposure_label_rects[i],x,y))
+         return(g_ps_exposure_label_item_indexes[i]);
+   return(-1);
+  }
+
 void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
                              const PSMarketSnapshot &market,const PSExposureSnapshot &exposure,
                              const PSEditorState &editor,
@@ -2018,6 +2220,7 @@ void PS_UIRender(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
    PS_UILayout(ui,model.view_mode);
    PS_UIPremiumRender(ui,model,calc,market,exposure,editor,copy_feedback_control);
    PS_UIExposureSidecarRender(ui,exposure,market);
+   PS_UIExposureLabelsRender(ui,exposure,market);
    PS_UIUpdateLines(ui,model,market);
    ChartRedraw(ChartID());
    ui.dirty=false;
@@ -2264,6 +2467,7 @@ void PS_UIDeleteOwned(PSUIState &ui)
    PS_UIHandleCanvasesDestroy();
    PS_UIDragCanvasDestroy();
    PS_UIExposureCanvasDestroy();
+   PS_UIExposureLabelsCanvasDestroy();
    PS_UIPanelCanvasDestroy();
    if(PS_UIHasOwnedPrefix(ui))
       ObjectsDeleteAll(ChartID(),ui.prefix);

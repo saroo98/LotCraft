@@ -99,6 +99,24 @@ def test_exposure_types_and_calc_issue_are_typed():
         assert token in types
 
 
+def test_exposure_engine_uses_broker_profit_calculation_and_tracks_incomplete_rows():
+    source = (SRC / "PS_Exposure.mqh").read_text(encoding="utf-8")
+    for token in (
+        "PositionsTotal()",
+        "OrdersTotal()",
+        "PositionGetDouble(POSITION_SL)",
+        "PositionGetDouble(POSITION_SWAP)",
+        "OrderGetDouble(ORDER_SL)",
+        "OrderGetDouble(ORDER_VOLUME_CURRENT)",
+        "OrderCalcProfit(",
+        "PS_EXPOSURE_NO_SL",
+        "PS_EXPOSURE_UNAVAILABLE",
+        "MathMax(0.0,-projected_result)",
+        "PS_ExposureMeaningfullyChanged",
+    ):
+        assert token in source
+
+
 def test_exact_internal_interactive_control_inventory():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     body = re.search(r"enum PSControlId\s*\{(.*?)\};", types, re.S).group(1)

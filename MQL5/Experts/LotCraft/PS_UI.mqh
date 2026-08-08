@@ -2,6 +2,7 @@
 #define __LOTCRAFT_PS_UI_MQH__
 
 #include "PS_Editor.mqh"
+#include "PS_Exposure.mqh"
 #include <Canvas\Canvas.mqh>
 
 const color PS_CLR_PANEL       = C'29,33,40';

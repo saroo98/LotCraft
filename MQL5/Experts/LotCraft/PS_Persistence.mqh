@@ -22,7 +22,8 @@ bool PS_PersistenceRead(const string key,double &value)
    return(PS_IsFinite(value));
   }
 
-void PS_PersistenceSave(const string base,const PSMarketSnapshot &market,const PSModel &model)
+void PS_PersistenceSave(const string base,const PSMarketSnapshot &market,const PSModel &model,
+                        const PSExposureUIState &exposure_ui)
   {
    GlobalVariableSet(PS_PersistenceKey(base,"acct"),(double)model.account_mode);
    GlobalVariableSet(PS_PersistenceKey(base,"manual"),model.manual_account_money);
@@ -38,6 +39,9 @@ void PS_PersistenceSave(const string base,const PSMarketSnapshot &market,const P
    // the same chart safely after a rollback.
    GlobalVariableSet(PS_PersistenceKey(base,"mini"),(model.view_mode==PS_VIEW_MINI ? 1.0 : 0.0));
    GlobalVariableSet(PS_PersistenceKey(base,"lines"),(model.lines_visible ? 1.0 : 0.0));
+   GlobalVariableSet(PS_PersistenceKey(base,"Exposure.DetailsOpen"),(exposure_ui.details_open ? 1.0 : 0.0));
+   GlobalVariableSet(PS_PersistenceKey(base,"Exposure.Scope"),(double)exposure_ui.scope);
+   GlobalVariableSet(PS_PersistenceKey(base,"Exposure.ChartLabels"),(exposure_ui.chart_labels_visible ? 1.0 : 0.0));
    if(market.symbol!="")
      {
       GlobalVariableSet(PS_PersistenceKey(base,"plansym"),(double)PS_HashString32(market.symbol));
@@ -49,7 +53,8 @@ void PS_PersistenceSave(const string base,const PSMarketSnapshot &market,const P
      }
   }
 
-bool PS_PersistenceLoad(const string base,const PSMarketSnapshot &market,PSModel &model)
+bool PS_PersistenceLoad(const string base,const PSMarketSnapshot &market,PSModel &model,
+                        PSExposureUIState &exposure_ui)
   {
    double value=0.0;
    if(PS_PersistenceRead(PS_PersistenceKey(base,"acct"),value))
@@ -89,6 +94,16 @@ bool PS_PersistenceLoad(const string base,const PSMarketSnapshot &market,PSModel
       if(theme==PS_THEME_DARK || theme==PS_THEME_LIGHT) model.theme_mode=(PSThemeMode)theme;
      }
    if(PS_PersistenceRead(PS_PersistenceKey(base,"lines"),value)) model.lines_visible=(value>=0.5);
+   if(PS_PersistenceRead(PS_PersistenceKey(base,"Exposure.DetailsOpen"),value))
+      exposure_ui.details_open=(value>=0.5);
+   if(PS_PersistenceRead(PS_PersistenceKey(base,"Exposure.Scope"),value))
+     {
+      int scope=(int)value;
+      if(scope==PS_EXPOSURE_SCOPE_CHART || scope==PS_EXPOSURE_SCOPE_ACCOUNT)
+         exposure_ui.scope=(PSExposureScope)scope;
+     }
+   if(PS_PersistenceRead(PS_PersistenceKey(base,"Exposure.ChartLabels"),value))
+      exposure_ui.chart_labels_visible=(value>=0.5);
 
    if(PS_PersistenceRead(PS_PersistenceKey(base,"direction"),value))
      {

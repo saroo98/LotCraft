@@ -211,6 +211,25 @@ def test_exposure_summary_geometry_and_interaction_contract():
     assert "g_exposure_ui.scroll_offset=0;" in main
 
 
+def test_exposure_sidecar_is_one_canvas_with_bounded_rows():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    assert "CCanvas g_ps_exposure_canvas;" in ui
+    assert "PS_EXPOSURE_VISIBLE_ROWS=8" in ui
+    assert "PS_UIExposureHitTest" in ui
+    assert "CreateBitmapLabel" in ui
+    render = ui[ui.index("void PS_UIExposureSidecarRender"):ui.index("PSExposureHit PS_UIExposureHitTest")]
+    assert "PS_UIEnsureBox" not in render
+    assert "ObjectCreate" not in render
+
+
+def test_exposure_sidecar_persists_preferences_not_financial_data():
+    persistence = (SRC / "PS_Persistence.mqh").read_text(encoding="utf-8")
+    for key in ["Exposure.DetailsOpen", "Exposure.Scope", "Exposure.ChartLabels"]:
+        assert key in persistence
+    for forbidden in ["Exposure.Ticket", "Exposure.Money", "Exposure.Symbol", "Exposure.Equity"]:
+        assert forbidden not in persistence
+
+
 def test_required_user_facing_control_text_is_present():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
@@ -452,8 +471,8 @@ def test_timeframe_reinitialization_restores_same_symbol_planning_state_only():
         assert key in persistence
     assert "PS_HashString32(market.symbol)" in persistence
     assert "same_planning_symbol" in persistence
-    assert "PS_PersistenceSave(g_persistence_base,g_market,g_model);" in main
-    assert "bool same_symbol_plan_loaded=PS_PersistenceLoad(g_persistence_base,g_market,g_model);" in main
+    assert "PS_PersistenceSave(g_persistence_base,g_market,g_model,g_exposure_ui);" in main
+    assert "bool same_symbol_plan_loaded=PS_PersistenceLoad(g_persistence_base,g_market,g_model,g_exposure_ui);" in main
     assert "same_symbol_plan_loaded &&" in main
     assert "PS_ModelStoredPlanStructurallyValid(g_model,g_market)" in main
     assert "if(!coherent_plan)" in main

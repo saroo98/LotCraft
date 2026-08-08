@@ -89,6 +89,10 @@ string  g_ps_drag_canvas_name="";
 CCanvas g_ps_panel_canvas;
 bool    g_ps_panel_canvas_created=false;
 string  g_ps_panel_canvas_name="";
+const int PS_EXPOSURE_VISIBLE_ROWS=8;
+CCanvas g_ps_exposure_canvas;
+bool    g_ps_exposure_canvas_created=false;
+string  g_ps_exposure_canvas_name="";
 
 string PS_UIName(const PSUIState &ui,const string suffix)
   {
@@ -979,6 +983,45 @@ string PS_UIRiskMoneyDisplay(const PSModel &model,const PSCalcResult &calc,
    return(requested+" ("+actual+")");
   }
 
+void PS_UIExposureCanvasDestroy()
+  {
+   if(g_ps_exposure_canvas_created) g_ps_exposure_canvas.Destroy();
+   g_ps_exposure_canvas_created=false;
+   g_ps_exposure_canvas_name="";
+  }
+
+bool PS_UIExposureCanvasEnsure(const PSUIState &ui,const PSRect &rect)
+  {
+   string name=PS_UIName(ui,"exposure.canvas");
+   if(g_ps_exposure_canvas_created && g_ps_exposure_canvas_name!=name)
+      PS_UIExposureCanvasDestroy();
+   if(!g_ps_exposure_canvas_created)
+     {
+      if(!g_ps_exposure_canvas.CreateBitmapLabel(ChartID(),0,name,rect.x,rect.y,rect.w,rect.h,
+                                                  COLOR_FORMAT_XRGB_NOALPHA))
+        {
+         PS_LogError(StringFormat("Cannot create exposure canvas %s (error %d).",name,GetLastError()));
+         return(false);
+        }
+      g_ps_exposure_canvas_created=true;
+      g_ps_exposure_canvas_name=name;
+      ObjectSetInteger(ChartID(),name,OBJPROP_SELECTABLE,false);
+      ObjectSetInteger(ChartID(),name,OBJPROP_SELECTED,false);
+      ObjectSetInteger(ChartID(),name,OBJPROP_HIDDEN,true);
+      ObjectSetInteger(ChartID(),name,OBJPROP_BACK,false);
+      ObjectSetInteger(ChartID(),name,OBJPROP_ZORDER,40000);
+      ObjectSetString(ChartID(),name,OBJPROP_TOOLTIP,"\n");
+     }
+   else if(g_ps_exposure_canvas.Width()!=rect.w || g_ps_exposure_canvas.Height()!=rect.h)
+     {
+      if(!g_ps_exposure_canvas.Resize(rect.w,rect.h)) return(false);
+     }
+   ObjectSetInteger(ChartID(),name,OBJPROP_XDISTANCE,rect.x);
+   ObjectSetInteger(ChartID(),name,OBJPROP_YDISTANCE,rect.y);
+   ObjectSetInteger(ChartID(),name,OBJPROP_TIMEFRAMES,OBJ_ALL_PERIODS);
+   return(true);
+  }
+
 string PS_UITradeText(const PSModel &model,const PSCalcResult &calc,
                       const PSMarketSnapshot &market,const bool mini)
   {
@@ -1483,6 +1526,205 @@ void PS_UIExposureSummary(const PSUIState &ui,const PSExposureSnapshot &exposure
      }
   }
 
+void PS_UIExposurePlace(PSUIState &ui)
+  {
+   int w=PS_U(320);
+   int h=PS_U(392);
+   int gap=PS_U(8);
+   int x=0;
+   int y=0;
+   if(ui.panel_x+ui.panel_w+gap+w<=ui.chart_w)
+     {
+      x=ui.panel_x+ui.panel_w+gap;
+      y=ui.panel_y;
+     }
+   else if(ui.panel_x-gap-w>=0)
+     {
+      x=ui.panel_x-gap-w;
+      y=ui.panel_y;
+     }
+   else if(ui.panel_y+ui.panel_h+gap+h<=ui.chart_h)
+     {
+      x=ui.panel_x;
+      y=ui.panel_y+ui.panel_h+gap;
+     }
+   else if(ui.panel_y-gap-h>=0)
+     {
+      x=ui.panel_x;
+      y=ui.panel_y-gap-h;
+     }
+   else
+     {
+      x=PS_ClampInt(ui.panel_x+PS_U(24),0,MathMax(0,ui.chart_w-w));
+      y=PS_ClampInt(ui.panel_y+PS_U(24),0,MathMax(0,ui.chart_h-h));
+     }
+   PS_UISetRect(g_exposure_ui.sidecar_rect,x,y,MathMin(w,ui.chart_w),MathMin(h,ui.chart_h));
+  }
+
+void PS_UIExposureText(const int x,const int y,const string value,const int size,
+                       const color clr,const uint alignment=TA_LEFT|TA_VCENTER,
+                       const string font="Segoe UI")
+  {
+   g_ps_exposure_canvas.FontSet(font,-10*PS_Font(size));
+   g_ps_exposure_canvas.TextOut(x,y-PS_PremiumOpticalCenterOffset(size),value,
+                                PS_PremiumColor(clr),alignment);
+  }
+
+int PS_UIExposureFilteredCount(const PSExposureSnapshot &exposure)
+  {
+   int count=0;
+   for(int i=0;i<ArraySize(exposure.items);i++)
+      if(g_exposure_ui.scope==PS_EXPOSURE_SCOPE_ACCOUNT || exposure.items[i].symbol==_Symbol)
+         count++;
+   return(count);
+  }
+
+int PS_UIExposureFilteredIndex(const PSExposureSnapshot &exposure,const int filtered_index)
+  {
+   int current=0;
+   for(int i=0;i<ArraySize(exposure.items);i++)
+     {
+      if(g_exposure_ui.scope==PS_EXPOSURE_SCOPE_CHART && exposure.items[i].symbol!=_Symbol) continue;
+      if(current==filtered_index) return(i);
+      current++;
+     }
+   return(-1);
+  }
+
+string PS_UIExposureProjectedMoney(const PSExposureItem &item,const PSMarketSnapshot &market)
+  {
+   if(item.status==PS_EXPOSURE_NO_SL) return("No SL");
+   if(item.status==PS_EXPOSURE_UNAVAILABLE) return("Unavailable");
+   if(item.projected_result>0.0) return("+"+PS_FormatMoneyDisplay(item.projected_result,market));
+   return(PS_FormatMoneyDisplay(item.projected_result,market));
+  }
+
+void PS_UIExposureSidecarRender(PSUIState &ui,const PSExposureSnapshot &exposure,
+                                const PSMarketSnapshot &market)
+  {
+   for(int i=0;i<PS_EXPOSURE_VISIBLE_ROWS;i++) PS_UIResetRect(g_exposure_ui.row_rects[i]);
+   if(!g_exposure_ui.details_open)
+     {
+      if(g_ps_exposure_canvas_created)
+         ObjectSetInteger(ChartID(),g_ps_exposure_canvas_name,OBJPROP_TIMEFRAMES,OBJ_NO_PERIODS);
+      PS_UIResetRect(g_exposure_ui.sidecar_rect);
+      return;
+     }
+
+   PS_UIExposurePlace(ui);
+   PSRect absolute=g_exposure_ui.sidecar_rect;
+   if(!PS_UIExposureCanvasEnsure(ui,absolute)) return;
+   int w=absolute.w;
+   int h=absolute.h;
+   g_ps_exposure_canvas.Erase(PS_PremiumColor(PS_ThemePanel()));
+   g_ps_exposure_canvas.Rectangle(0,0,w-1,h-1,PS_PremiumColor(PS_ThemeBorder()));
+
+   PS_UIExposureText(PS_U(12),PS_U(18),"SL exposure",12,PS_ThemeText(),TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
+   PS_UISetRect(g_exposure_ui.close_rect,absolute.x+w-PS_U(30),absolute.y+PS_U(5),PS_U(24),PS_U(24));
+   PS_UIExposureText(w-PS_U(18),PS_U(18),"×",12,PS_ThemeMuted(),TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
+
+   int tab_y=PS_U(34);
+   int tab_gap=PS_U(6);
+   int tab_w=(w-PS_U(20)-tab_gap)/2;
+   PS_UISetRect(g_exposure_ui.scope_chart_rect,absolute.x+PS_U(10),absolute.y+tab_y,tab_w,PS_U(27));
+   PS_UISetRect(g_exposure_ui.scope_account_rect,absolute.x+PS_U(10)+tab_w+tab_gap,absolute.y+tab_y,tab_w,PS_U(27));
+   bool chart_scope=(g_exposure_ui.scope==PS_EXPOSURE_SCOPE_CHART);
+   g_ps_exposure_canvas.FillRectangle(PS_U(10),tab_y,PS_U(10)+tab_w,tab_y+PS_U(27),
+                                      PS_PremiumColor(chart_scope ? PS_ThemeAction() : PS_ThemeControl()));
+   g_ps_exposure_canvas.FillRectangle(PS_U(10)+tab_w+tab_gap,tab_y,w-PS_U(10),tab_y+PS_U(27),
+                                      PS_PremiumColor(chart_scope ? PS_ThemeControl() : PS_ThemeAction()));
+   PS_UIExposureText(PS_U(10)+tab_w/2,tab_y+PS_U(14),"Current chart",9,
+                     chart_scope ? PS_ThemeOnAccent() : PS_ThemeMuted(),TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
+   PS_UIExposureText(PS_U(10)+tab_w+tab_gap+tab_w/2,tab_y+PS_U(14),"Account",9,
+                     chart_scope ? PS_ThemeMuted() : PS_ThemeOnAccent(),TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
+
+   double money=(chart_scope ? exposure.chart_loss_money : exposure.account_loss_money);
+   double percent=(chart_scope ? exposure.chart_loss_percent : exposure.account_loss_percent);
+   int protected_count=(chart_scope ? exposure.chart_protected : exposure.account_protected);
+   int no_sl=(chart_scope ? exposure.chart_no_sl : exposure.account_no_sl);
+   int unavailable=(chart_scope ? exposure.chart_unavailable : exposure.account_unavailable);
+   string percent_text=(exposure.equity_basis>0.0 ? DoubleToString(percent,2)+"%" : "—%");
+   PS_UIExposureText(PS_U(12),PS_U(76),percent_text,16,PS_ThemeLoss(),TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
+   PS_UIExposureText(w-PS_U(12),PS_U(76),PS_FormatMoneyDisplay(money,market),14,PS_ThemeLoss(),TA_RIGHT|TA_VCENTER,"Segoe UI Semibold");
+   string coverage=IntegerToString(protected_count)+" protected";
+   if(no_sl>0) coverage+=" · "+IntegerToString(no_sl)+" without SL";
+   if(unavailable>0) coverage+=" · "+IntegerToString(unavailable)+" unavailable";
+   PS_UIExposureText(PS_U(12),PS_U(96),coverage,8,
+                     (no_sl+unavailable>0 ? PS_ThemeIncomplete() : PS_ThemeMuted()));
+
+   PS_UISetRect(g_exposure_ui.labels_toggle_rect,absolute.x+PS_U(10),absolute.y+PS_U(104),PS_U(166),PS_U(20));
+   PS_UIExposureText(PS_U(12),PS_U(114),
+                     "Chart labels: "+(g_exposure_ui.chart_labels_visible ? "On" : "Off"),8,
+                     (g_exposure_ui.chart_labels_visible ? PS_ThemeAction() : PS_ThemeMuted()),
+                     TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
+   PS_UISetRect(g_exposure_ui.scroll_up_rect,absolute.x+w-PS_U(52),absolute.y+PS_U(102),PS_U(20),PS_U(22));
+   PS_UISetRect(g_exposure_ui.scroll_down_rect,absolute.x+w-PS_U(28),absolute.y+PS_U(102),PS_U(20),PS_U(22));
+   PS_UIExposureText(w-PS_U(42),PS_U(113),"▲",8,PS_ThemeMuted(),TA_CENTER|TA_VCENTER);
+   PS_UIExposureText(w-PS_U(18),PS_U(113),"▼",8,PS_ThemeMuted(),TA_CENTER|TA_VCENTER);
+
+   int filtered_count=PS_UIExposureFilteredCount(exposure);
+   int max_scroll=MathMax(0,filtered_count-PS_EXPOSURE_VISIBLE_ROWS);
+   g_exposure_ui.scroll_offset=PS_ClampInt(g_exposure_ui.scroll_offset,0,max_scroll);
+   int row_y=PS_U(128);
+   int row_h=PS_U(28);
+   for(int row=0;row<PS_EXPOSURE_VISIBLE_ROWS;row++)
+     {
+      int filtered_index=g_exposure_ui.scroll_offset+row;
+      if(filtered_index>=filtered_count) break;
+      int item_index=PS_UIExposureFilteredIndex(exposure,filtered_index);
+      if(item_index<0) break;
+      PSExposureItem item;
+      PS_ExposureCopyItem(item,exposure.items[item_index]);
+      int top=row_y+row*row_h;
+      PS_UISetRect(g_exposure_ui.row_rects[row],absolute.x+PS_U(7),absolute.y+top,w-PS_U(14),row_h);
+      if(g_exposure_ui.hovered_row==item_index)
+         g_ps_exposure_canvas.FillRectangle(PS_U(7),top,w-PS_U(7),top+row_h-1,PS_PremiumColor(PS_ThemeHover()));
+      g_ps_exposure_canvas.Line(PS_U(8),top+row_h-1,w-PS_U(8),top+row_h-1,PS_PremiumColor(PS_ThemeDivider()));
+      string kind=(item.kind==PS_EXPOSURE_PENDING ? "Pending " : "");
+      string direction=(item.direction==PS_DIRECTION_LONG ? "Buy " : "Sell ");
+      string primary=item.symbol+"  "+kind+direction+DoubleToString(item.volume,2);
+      string ticket=StringFormat("#%04d",(int)(item.ticket%10000));
+      string secondary=(PS_IsPositiveFinite(item.stop_loss) ? "SL "+DoubleToString(item.stop_loss,4) : "SL —")+" · "+ticket;
+      color result_color=(item.status==PS_EXPOSURE_VALID
+                          ? (item.projected_result>0.0 ? PS_ThemeProfit() : PS_ThemeLoss())
+                          : PS_ThemeIncomplete());
+      string result=PS_UIExposureProjectedMoney(item,market);
+      string result_percent=(item.status==PS_EXPOSURE_VALID && exposure.equity_basis>0.0
+                             ? (item.projected_result>0.0 ? "+" : "−")+
+                               DoubleToString(MathAbs(item.projected_result)/exposure.equity_basis*100.0,2)+"%"
+                             : "—");
+      PS_UIExposureText(PS_U(12),top+PS_U(9),primary,8,PS_ThemeText(),TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
+      PS_UIExposureText(PS_U(12),top+PS_U(21),secondary,7,PS_ThemeMuted());
+      PS_UIExposureText(w-PS_U(12),top+PS_U(9),result,8,result_color,TA_RIGHT|TA_VCENTER,"Segoe UI Semibold");
+      PS_UIExposureText(w-PS_U(12),top+PS_U(21),result_percent,7,result_color,TA_RIGHT|TA_VCENTER);
+     }
+
+   PS_UIExposureText(PS_U(10),h-PS_U(12),
+                     "Gross at SL · future swap, slippage and unknown fees excluded.",7,
+                     PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
+   g_ps_exposure_canvas.Update(false);
+  }
+
+PSExposureHit PS_UIExposureHitTest(const int x,const int y,int &row_index)
+  {
+   row_index=-1;
+   if(!g_exposure_ui.details_open || !PS_RectContains(g_exposure_ui.sidecar_rect,x,y))
+      return(PS_EXPOSURE_HIT_NONE);
+   if(PS_RectContains(g_exposure_ui.close_rect,x,y)) return(PS_EXPOSURE_HIT_CLOSE);
+   if(PS_RectContains(g_exposure_ui.scope_chart_rect,x,y)) return(PS_EXPOSURE_HIT_SCOPE_CHART);
+   if(PS_RectContains(g_exposure_ui.scope_account_rect,x,y)) return(PS_EXPOSURE_HIT_SCOPE_ACCOUNT);
+   if(PS_RectContains(g_exposure_ui.labels_toggle_rect,x,y)) return(PS_EXPOSURE_HIT_LABELS_TOGGLE);
+   if(PS_RectContains(g_exposure_ui.scroll_up_rect,x,y)) return(PS_EXPOSURE_HIT_SCROLL_UP);
+   if(PS_RectContains(g_exposure_ui.scroll_down_rect,x,y)) return(PS_EXPOSURE_HIT_SCROLL_DOWN);
+   for(int i=0;i<PS_EXPOSURE_VISIBLE_ROWS;i++)
+      if(PS_RectContains(g_exposure_ui.row_rects[i],x,y))
+        {
+         row_index=i;
+         return(PS_EXPOSURE_HIT_ROW);
+        }
+   return(PS_EXPOSURE_HIT_NONE);
+  }
+
 void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
                              const PSMarketSnapshot &market,const PSExposureSnapshot &exposure,
                              const PSEditorState &editor,
@@ -1775,6 +2017,7 @@ void PS_UIRender(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
    ulong started=GetMicrosecondCount();
    PS_UILayout(ui,model.view_mode);
    PS_UIPremiumRender(ui,model,calc,market,exposure,editor,copy_feedback_control);
+   PS_UIExposureSidecarRender(ui,exposure,market);
    PS_UIUpdateLines(ui,model,market);
    ChartRedraw(ChartID());
    ui.dirty=false;
@@ -2020,6 +2263,7 @@ void PS_UIDeleteOwned(PSUIState &ui)
    PS_UIRestoreEvents(ui);
    PS_UIHandleCanvasesDestroy();
    PS_UIDragCanvasDestroy();
+   PS_UIExposureCanvasDestroy();
    PS_UIPanelCanvasDestroy();
    if(PS_UIHasOwnedPrefix(ui))
       ObjectsDeleteAll(ChartID(),ui.prefix);

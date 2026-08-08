@@ -183,10 +183,32 @@ def test_exact_internal_interactive_control_inventory():
         "PS_CTRL_ORDER_MODE", "PS_CTRL_LINES", "PS_CTRL_COMMISSION_MODE", "PS_CTRL_COMMISSION_FIELD",
         "PS_CTRL_ACCOUNT_MODE", "PS_CTRL_ACCOUNT_FIELD", "PS_CTRL_RISK_PERCENT_FIELD",
         "PS_CTRL_RISK_MONEY_FIELD", "PS_CTRL_ACTUAL_PERCENT", "PS_CTRL_ACTUAL_MONEY",
-        "PS_CTRL_POSITION_SIZE", "PS_CTRL_POSITION_COPY", "PS_CTRL_MOVE_SLS", "PS_CTRL_CONFIRM",
+        "PS_CTRL_POSITION_SIZE", "PS_CTRL_POSITION_COPY", "PS_CTRL_EXPOSURE_SUMMARY", "PS_CTRL_MOVE_SLS", "PS_CTRL_CONFIRM",
         "PS_CTRL_TRADE",
     ]
     assert controls == expected
+
+
+def test_exposure_summary_is_full_and_compact_only():
+    types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    assert "PS_CTRL_EXPOSURE_SUMMARY" in types
+    assert "PS_UIExposureMetric" in ui
+    assert "PS_UIExposureSummary" in ui
+    mini = ui[ui.index("void PS_PremiumRenderMini"):ui.index("void PS_UIPremiumRender")]
+    assert "PS_UIExposureSummary" not in mini
+
+
+def test_exposure_summary_geometry_and_interaction_contract():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(20),y+PS_U(367),PS_U(398),PS_U(38)" in ui
+    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(8),y+PS_U(333),PS_U(356),PS_U(32)" in ui
+    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(423)" in ui
+    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(377)" in ui
+    assert "case PS_CTRL_EXPOSURE_SUMMARY:" in main
+    assert "g_exposure_ui.details_open=!g_exposure_ui.details_open;" in main
+    assert "g_exposure_ui.scroll_offset=0;" in main
 
 
 def test_required_user_facing_control_text_is_present():
@@ -325,7 +347,8 @@ def test_full_mode_uses_one_inset_grid_without_touching_or_crossing_borders():
         "PS_CTRL_RISK_MONEY_FIELD],x+PS_U(291),y+PS_U(291),PS_U(127),PS_U(28)",
         "PS_CTRL_POSITION_SIZE],x+PS_U(92),y+PS_U(327),PS_U(281),PS_U(28)",
         "PS_CTRL_POSITION_COPY],x+PS_U(379),y+PS_U(327),PS_U(39),PS_U(28)",
-        "PS_CTRL_TRADE],content_x,y+PS_U(419),content_w,PS_U(40)",
+        "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(20),y+PS_U(367),PS_U(398),PS_U(38)",
+        "PS_CTRL_TRADE],content_x,y+PS_U(467),content_w,PS_U(40)",
     ]:
         assert geometry in ui
     assert "g_ps_metrics.full_h" in ui
@@ -343,10 +366,10 @@ def test_full_mode_uses_compact_visual_language_without_decorative_control_icons
     assert 'PS_PremiumControlButton(ui,PS_CTRL_MINI,"Mini"' in full
     assert 'PS_PremiumRoundRect(PS_U(10),PS_U(47),PS_U(418),PS_U(48)' in full
     assert 'PS_PremiumRoundRect(PS_U(10),PS_U(102),PS_U(418),PS_U(139)' in full
-    assert 'PS_PremiumRoundRect(PS_U(10),PS_U(247),PS_U(418),PS_U(120)' in full
+    assert 'PS_PremiumRoundRect(PS_U(10),PS_U(247),PS_U(418),PS_U(168)' in full
     assert "PS_PremiumCompactField(ui,PS_CTRL_ENTRY_FIELD" in full
     assert "PS_PremiumRoundRect(10,488,436,27" not in full
-    assert "PS_CTRL_TRADE],content_x,y+PS_U(419),content_w,PS_U(40)" in ui
+    assert "PS_CTRL_TRADE],content_x,y+PS_U(467),content_w,PS_U(40)" in ui
     for token in [
         "PS_PremiumLogo(",
         "PS_PremiumSlidersIcon(",
@@ -582,14 +605,14 @@ def test_compact_geometry_is_materially_smaller_and_single_canvas_renderer_is_pr
     for geometry in [
         "PS_PremiumRoundRect(PS_U(8),PS_U(43),PS_U(356),PS_U(42)",
         "PS_PremiumRoundRect(PS_U(8),PS_U(91),PS_U(356),PS_U(126)",
-        "PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(106)",
+        "PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(146)",
     ]:
         assert geometry in compact
     assert "g_ps_panel_canvas.Line(9,278" not in compact
     assert "g_ps_panel_canvas.Line(9,319" not in compact
     assert "g_ps_panel_canvas.Line(181,279" not in compact
     assert 'PS_PremiumControlButton(ui,PS_CTRL_MINI,"Mini"' in compact
-    assert "PS_PremiumRenderCompact(ui,model,calc,market,editor,copy_feedback_control);" in premium
+    assert "PS_PremiumRenderCompact(ui,model,calc,market,exposure,editor,copy_feedback_control);" in premium
     assert "g_ps_panel_canvas.Update(false);" in premium
     assert "OBJ_RECTANGLE_LABEL" not in compact
     assert "ChartRedraw" not in compact
@@ -613,7 +636,7 @@ def test_stop_loss_position_automatically_controls_direction_in_every_input_path
     assert "PS_DIRECTION_LONG" in align and "PS_DIRECTION_SHORT" in align
     assert "direction_changed=PS_ModelAlignDirectionToStop" in update
     assert "if(direction_changed)" in update
-    assert "PS_UIRender(g_ui,g_model,g_calc,g_market,g_editor,g_copy_feedback_control);" in update
+    assert "PS_UIRender(g_ui,g_model,g_calc,g_market,g_exposure,g_editor,g_copy_feedback_control);" in update
     assert "PS_ModelAlignDirectionToStop(g_model,g_market);" in commit
     assert "PS_ModelAlignDirectionToStop(g_model,g_market);" in step
 

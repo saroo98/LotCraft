@@ -210,7 +210,7 @@ void PS_RenderIfDirty()
       if(g_ui.line_dirty) PS_UIRenderLinesOnly(g_ui,g_model,g_market);
       return;
      }
-   if(g_ui.dirty) PS_UIRender(g_ui,g_model,g_calc,g_market,g_editor,g_copy_feedback_control);
+   if(g_ui.dirty) PS_UIRender(g_ui,g_model,g_calc,g_market,g_exposure,g_editor,g_copy_feedback_control);
    else if(g_ui.line_dirty) PS_UIRenderLinesOnly(g_ui,g_model,g_market);
   }
 
@@ -593,6 +593,11 @@ void PS_Action(const PSControlId control)
       case PS_CTRL_POSITION_COPY:
          PS_DoCopy(control);
          break;
+      case PS_CTRL_EXPOSURE_SUMMARY:
+         g_exposure_ui.details_open=!g_exposure_ui.details_open;
+         g_exposure_ui.scroll_offset=0;
+         g_ui.dirty=true;
+         break;
       case PS_CTRL_MOVE_SLS:
          PS_DoMoveStops();
          break;
@@ -655,7 +660,7 @@ bool PS_UpdateLevelFromPointer(const PSCaptureMode capture,const int x,const int
    // panel once at that boundary so Long/Short changes immediately, while
    // keeping the rest of pointer motion on the lightweight line-only path.
    if(direction_changed)
-      PS_UIRender(g_ui,g_model,g_calc,g_market,g_editor,g_copy_feedback_control);
+      PS_UIRender(g_ui,g_model,g_calc,g_market,g_exposure,g_editor,g_copy_feedback_control);
    else
       PS_RenderIfDirty();
    return(true);

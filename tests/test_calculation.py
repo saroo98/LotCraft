@@ -21,6 +21,7 @@ from reference_model import (
     floor_volume,
     pending_leg_gap,
     switch_account_mode,
+    short_issue,
 )
 
 
@@ -35,6 +36,14 @@ def test_instant_long_and_short(direction, expected):
     assert result.valid, result.error
     assert result.order_type is expected
     assert result.effective_entry == pytest.approx(market.ask if direction is Direction.LONG else market.bid)
+
+
+def test_invalid_trade_reasons_are_short_and_deterministic():
+    assert short_issue("stop_distance") == "SL too close"
+    assert short_issue("quote") == "Waiting for quote"
+    assert short_issue("session") == "Market closed"
+    assert short_issue("permission") == "Trading disabled"
+    assert short_issue("unknown") == "Check settings"
 
 
 @pytest.mark.parametrize(

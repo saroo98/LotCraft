@@ -956,41 +956,33 @@ string PS_UIFieldDisplay(const PSFieldId field,const PSModel &model,const PSCalc
      }
   }
 
-string PS_UIGroupDecimalText(const string source)
-  {
-   if(source=="") return(source);
-   int point=StringFind(source,".");
-   string whole=(point>=0 ? StringSubstr(source,0,point) : source);
-   string fraction=(point>=0 ? StringSubstr(source,point) : "");
-   string sign="";
-   if(StringLen(whole)>0 && StringSubstr(whole,0,1)=="-")
-     {
-      sign="-";
-      whole=StringSubstr(whole,1);
-     }
-   int length=StringLen(whole);
-   string grouped="";
-   for(int i=0;i<length;i++)
-     {
-      if(i>0 && ((length-i)%3)==0) grouped+=",";
-      grouped+=StringSubstr(whole,i,1);
-     }
-   return(sign+grouped+fraction);
-  }
-
 string PS_UIRiskMoneyDisplay(const PSModel &model,const PSCalcResult &calc,
                              const PSMarketSnapshot &market,const PSEditorState &editor)
   {
    if(editor.active && editor.field==PS_FIELD_RISK_MONEY)
       return(PS_UIFieldDisplay(PS_FIELD_RISK_MONEY,model,calc,market,editor));
 
-   string requested=PS_UIGroupDecimalText(
+   string requested=PS_GroupDecimalText(
       PS_MoneyText(calc.requested_money>0.0 ? calc.requested_money : model.requested_risk_money,market));
    if(!calc.valid) return(requested);
 
-   string actual=PS_UIGroupDecimalText(PS_MoneyText(calc.actual_money,market));
+   string actual=PS_GroupDecimalText(PS_MoneyText(calc.actual_money,market));
    if(actual==requested) return(requested);
    return(requested+" ("+actual+")");
+  }
+
+string PS_UITradeText(const PSModel &model,const PSCalcResult &calc,
+                      const PSMarketSnapshot &market,const bool mini)
+  {
+   if(!calc.valid)
+     {
+      string reason=PS_CalcIssueText(calc.issue);
+      return(mini && StringLen(reason)>14 ? "Cannot trade" : "Cannot trade · "+reason);
+     }
+   string volume=PS_VolumeText(calc.volume,market);
+   if(model.order_mode==PS_ORDER_INSTANT)
+      return((model.direction==PS_DIRECTION_LONG ? "BUY " : "SELL ")+volume+" MARKET");
+   return("PLACE "+PS_Upper(calc.resolved_order_text)+" "+volume);
   }
 
 void PS_UIRenderEditor(const PSUIState &ui,const PSEditorState &editor)
@@ -1054,15 +1046,7 @@ void PS_UIRenderLegacyReference(PSUIState &ui,const PSModel &model,const PSCalcR
 
    color direction_color=(model.direction==PS_DIRECTION_LONG ? PS_CLR_LONG : PS_CLR_SHORT);
    string volume=PS_VolumeText(calc.volume,market);
-   string trade_text;
-   if(calc.valid)
-     {
-      if(model.order_mode==PS_ORDER_INSTANT)
-         trade_text=(model.direction==PS_DIRECTION_LONG ? "BUY " : "SELL ")+volume+" MARKET";
-      else
-         trade_text="PLACE "+PS_Upper(calc.resolved_order_text)+" "+volume;
-     }
-   else trade_text="Cannot trade";
+   string trade_text=PS_UITradeText(model,calc,market,model.view_mode==PS_VIEW_MINI);
 
    if(model.view_mode==PS_VIEW_MINI)
      {
@@ -1099,7 +1083,7 @@ void PS_UIRenderLegacyReference(PSUIState &ui,const PSModel &model,const PSCalcR
    PS_UIStaticLabel(ui,"commission",0,0,"",false);
    PS_UIStaticLabel(ui,"account",x+12,y+241,"Account money",true);
    PS_UIStaticLabel(ui,"riskp",x+12,y+277,"Risk, %",true);
-   PS_UIStaticLabel(ui,"riskm",x+12,y+313,"Risk, "+market.account_currency,true);
+   PS_UIStaticLabel(ui,"riskm",x+12,y+313,"Risk, "+PS_CurrencyAdornment(market.account_currency),true);
    PS_UIStaticLabel(ui,"actualp",0,0,"",false);
    PS_UIStaticLabel(ui,"actualm",0,0,"",false);
    PS_UIStaticLabel(ui,"size",x+12,y+349,"Size",true);
@@ -1485,7 +1469,7 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
    PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(106),5,PS_ThemeSection(),PS_ThemeBorder());
    PS_PremiumText(PS_U(16),PS_U(244),"Account",9,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
    PS_PremiumText(PS_U(16),PS_U(274),"Risk, %",9,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
-   PS_PremiumText(PS_U(182),PS_U(274),"Risk, "+market.account_currency,9,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
+   PS_PremiumText(PS_U(182),PS_U(274),"Risk, "+PS_CurrencyAdornment(market.account_currency),9,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
    PS_PremiumText(PS_U(16),PS_U(304),"Size",9,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
 
    PSRect account_mode_rect;
@@ -1500,7 +1484,7 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
    PS_PremiumCompactField(ui,PS_CTRL_ACCOUNT_FIELD,
                           (editor.active && editor.field==PS_FIELD_ACCOUNT
                            ? PS_UIFieldDisplay(PS_FIELD_ACCOUNT,model,calc,market,editor)
-                           : PS_UIGroupDecimalText(PS_UIFieldDisplay(PS_FIELD_ACCOUNT,model,calc,market,editor))),
+                           : PS_GroupDecimalText(PS_UIFieldDisplay(PS_FIELD_ACCOUNT,model,calc,market,editor))),
                            editor,PS_FIELD_ACCOUNT,!manual,false,11,12);
    PS_PremiumCompactField(ui,PS_CTRL_RISK_PERCENT_FIELD,
                           PS_UIFieldDisplay(PS_FIELD_RISK_PERCENT,model,calc,market,editor),
@@ -1509,7 +1493,7 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
                           PS_UIRiskMoneyDisplay(model,calc,market,editor),
                            editor,PS_FIELD_RISK_MONEY,false,model.risk_authority==PS_RISK_MONEY,11,12);
    PS_PremiumCompactField(ui,PS_CTRL_POSITION_SIZE,
-                          PS_UIGroupDecimalText(PS_VolumeText(calc.volume,market)),
+                          PS_GroupDecimalText(PS_VolumeText(calc.volume,market)),
                            editor,PS_FIELD_NONE,true,false,11,12);
    PS_PremiumCompactSmallControl(ui,PS_CTRL_POSITION_COPY,"C",
                                   copy_feedback_control==PS_CTRL_POSITION_COPY,21);
@@ -1526,16 +1510,7 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
    PS_PremiumControlButton(ui,PS_CTRL_MOVE_SLS,"Move SLs to line",false,PS_PREMIUM_BLUE,21);
 
    color trade_color=(model.direction==PS_DIRECTION_LONG ? PS_PREMIUM_GREEN : PS_CLR_SHORT);
-   string volume=PS_VolumeText(calc.volume,market);
-   string trade_text;
-   if(calc.valid)
-     {
-      if(model.order_mode==PS_ORDER_INSTANT)
-         trade_text=(model.direction==PS_DIRECTION_LONG ? "BUY " : "SELL ")+volume+" MARKET";
-      else
-         trade_text="PLACE "+PS_Upper(calc.resolved_order_text)+" "+volume;
-     }
-   else trade_text="Cannot trade";
+   string trade_text=PS_UITradeText(model,calc,market,false);
    PSRect trade_rect;
    PS_PremiumControlRect(ui,PS_CTRL_TRADE,trade_rect);
    PS_PremiumButton(trade_rect,"",calc.valid,trade_color,18,true);
@@ -1548,10 +1523,7 @@ void PS_PremiumRenderMini(PSUIState &ui,const PSModel &model,const PSCalcResult 
                           const PSMarketSnapshot &market,const PSEditorState &editor)
   {
    color direction_color=(model.direction==PS_DIRECTION_LONG ? PS_PREMIUM_GREEN : PS_CLR_SHORT);
-   string volume=PS_VolumeText(calc.volume,market);
-   string trade_text=(calc.valid
-                      ? (model.direction==PS_DIRECTION_LONG ? "BUY " : "SELL ")+volume+" MARKET"
-                      : "Cannot trade");
+   string trade_text=PS_UITradeText(model,calc,market,true);
    g_ps_panel_canvas.Erase(PS_PremiumColor(PS_ThemeBackground()));
    PS_PremiumRoundRect(PS_U(1),PS_U(1),ui.panel_w-PS_U(2),ui.panel_h-PS_U(2),8,PS_ThemePanel(),PS_ThemeBorder());
    PS_PremiumText(PS_U(12),PS_U(21),PS_PRODUCT_NAME,14,PS_ThemeText(),TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
@@ -1650,7 +1622,7 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
    PS_PremiumRoundRect(PS_U(10),PS_U(247),PS_U(418),PS_U(120),5,PS_ThemeSection(),PS_ThemeBorder());
    PS_PremiumText(PS_U(20),PS_U(269),"Account",10,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
    PS_PremiumText(PS_U(20),PS_U(305),"Risk, %",10,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
-   PS_PremiumText(PS_U(219),PS_U(305),"Risk, "+market.account_currency,10,PS_ThemeMuted(),
+   PS_PremiumText(PS_U(219),PS_U(305),"Risk, "+PS_CurrencyAdornment(market.account_currency),10,PS_ThemeMuted(),
                     TA_LEFT|TA_VCENTER);
    PS_PremiumText(PS_U(20),PS_U(341),"Size",10,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
    PS_PremiumControlButton(ui,PS_CTRL_ACCOUNT_MODE,"",false,PS_PREMIUM_BLUE,20);
@@ -1665,7 +1637,7 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
    PS_PremiumCompactField(ui,PS_CTRL_ACCOUNT_FIELD,
                           (editor.active && editor.field==PS_FIELD_ACCOUNT
                            ? PS_UIFieldDisplay(PS_FIELD_ACCOUNT,model,calc,market,editor)
-                           : PS_UIGroupDecimalText(PS_UIFieldDisplay(PS_FIELD_ACCOUNT,model,calc,market,editor))),
+                           : PS_GroupDecimalText(PS_UIFieldDisplay(PS_FIELD_ACCOUNT,model,calc,market,editor))),
                            editor,PS_FIELD_ACCOUNT,!manual,false,11,13);
    PS_PremiumCompactField(ui,PS_CTRL_RISK_PERCENT_FIELD,
                           PS_UIFieldDisplay(PS_FIELD_RISK_PERCENT,model,calc,market,editor),
@@ -1676,7 +1648,7 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
                           editor,PS_FIELD_RISK_MONEY,false,
                            model.risk_authority==PS_RISK_MONEY,11,13);
    PS_PremiumCompactField(ui,PS_CTRL_POSITION_SIZE,
-                          PS_UIGroupDecimalText(PS_VolumeText(calc.volume,market)),
+                          PS_GroupDecimalText(PS_VolumeText(calc.volume,market)),
                            editor,PS_FIELD_NONE,true,false,11,13);
    PS_PremiumCompactSmallControl(ui,PS_CTRL_POSITION_COPY,"C",
                                  copy_feedback_control==PS_CTRL_POSITION_COPY,27);
@@ -1689,16 +1661,7 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
    PS_PremiumControlButton(ui,PS_CTRL_MOVE_SLS,"Move SLs to line",false,PS_PREMIUM_BLUE,21);
 
    color direction_color=(model.direction==PS_DIRECTION_LONG ? PS_PREMIUM_GREEN : PS_CLR_SHORT);
-   string volume=PS_VolumeText(calc.volume,market);
-   string trade_text;
-   if(calc.valid)
-     {
-      if(model.order_mode==PS_ORDER_INSTANT)
-         trade_text=(model.direction==PS_DIRECTION_LONG ? "BUY " : "SELL ")+volume+" MARKET";
-      else
-         trade_text="PLACE "+PS_Upper(calc.resolved_order_text)+" "+volume;
-     }
-   else trade_text="Cannot trade";
+   string trade_text=PS_UITradeText(model,calc,market,false);
    PSRect trade_rect;
    PS_PremiumControlRect(ui,PS_CTRL_TRADE,trade_rect);
    PS_PremiumButton(trade_rect,"",calc.valid,direction_color,29,true);

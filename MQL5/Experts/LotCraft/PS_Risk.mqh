@@ -229,6 +229,7 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
      {
       if(!market.tick_valid)
         {
+         calc.issue=PS_CALC_ISSUE_QUOTE;
          error=(market.error!="" ? market.error : "A current quote is required for an Instant order.");
          return(false);
         }
@@ -237,6 +238,7 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
       calc.resolved_order_text=PS_OrderTypeText(calc.resolved_order_type);
       if((market.order_mode & SYMBOL_ORDER_MARKET)!=SYMBOL_ORDER_MARKET)
         {
+         calc.issue=PS_CALC_ISSUE_ORDER_MODE;
          error="The broker does not allow market orders for this symbol.";
          return(false);
         }
@@ -245,11 +247,13 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
 
    if(!PS_IsPositiveFinite(model.entry))
      {
+      calc.issue=PS_CALC_ISSUE_ENTRY;
       error="Pending Entry must be a positive finite price.";
       return(false);
      }
    if(!market.tick_valid)
      {
+      calc.issue=PS_CALC_ISSUE_QUOTE;
       error=(market.error!="" ? market.error : "A current quote is required to infer the pending-order subtype.");
       return(false);
      }
@@ -265,11 +269,13 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
          calc.resolved_order_type=ORDER_TYPE_BUY_LIMIT;
          if(market.tick.ask-calc.effective_entry+PS_DOUBLE_EPS<minimum)
            {
+            calc.issue=PS_CALC_ISSUE_ENTRY;
             error="Buy Limit Entry is inside the broker stop/freeze distance.";
             return(false);
            }
          if((market.order_mode & SYMBOL_ORDER_LIMIT)!=SYMBOL_ORDER_LIMIT)
            {
+            calc.issue=PS_CALC_ISSUE_ORDER_MODE;
             error="The broker does not allow limit orders for this symbol.";
             return(false);
            }
@@ -279,11 +285,13 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
          calc.resolved_order_type=ORDER_TYPE_BUY_STOP;
          if(calc.effective_entry-market.tick.ask+PS_DOUBLE_EPS<minimum)
            {
+            calc.issue=PS_CALC_ISSUE_ENTRY;
             error="Buy Stop Entry is inside the broker stop/freeze distance.";
             return(false);
            }
          if((market.order_mode & SYMBOL_ORDER_STOP)!=SYMBOL_ORDER_STOP)
            {
+            calc.issue=PS_CALC_ISSUE_ORDER_MODE;
             error="The broker does not allow stop orders for this symbol.";
             return(false);
            }
@@ -291,6 +299,7 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
       else
         {
          calc.pending_ambiguous=true;
+         calc.issue=PS_CALC_ISSUE_ENTRY;
          error="Long Pending Entry must be clearly below Ask (Buy Limit) or above Ask (Buy Stop).";
          return(false);
         }
@@ -302,11 +311,13 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
          calc.resolved_order_type=ORDER_TYPE_SELL_LIMIT;
          if(calc.effective_entry-market.tick.bid+PS_DOUBLE_EPS<minimum)
            {
+            calc.issue=PS_CALC_ISSUE_ENTRY;
             error="Sell Limit Entry is inside the broker stop/freeze distance.";
             return(false);
            }
          if((market.order_mode & SYMBOL_ORDER_LIMIT)!=SYMBOL_ORDER_LIMIT)
            {
+            calc.issue=PS_CALC_ISSUE_ORDER_MODE;
             error="The broker does not allow limit orders for this symbol.";
             return(false);
            }
@@ -316,11 +327,13 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
          calc.resolved_order_type=ORDER_TYPE_SELL_STOP;
          if(market.tick.bid-calc.effective_entry+PS_DOUBLE_EPS<minimum)
            {
+            calc.issue=PS_CALC_ISSUE_ENTRY;
             error="Sell Stop Entry is inside the broker stop/freeze distance.";
             return(false);
            }
          if((market.order_mode & SYMBOL_ORDER_STOP)!=SYMBOL_ORDER_STOP)
            {
+            calc.issue=PS_CALC_ISSUE_ORDER_MODE;
             error="The broker does not allow stop orders for this symbol.";
             return(false);
            }
@@ -328,6 +341,7 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
       else
         {
          calc.pending_ambiguous=true;
+         calc.issue=PS_CALC_ISSUE_ENTRY;
          error="Short Pending Entry must be clearly above Bid (Sell Limit) or below Bid (Sell Stop).";
          return(false);
         }
@@ -345,6 +359,7 @@ bool PS_RiskValidateProtectivePrices(const PSModel &model,const PSMarketSnapshot
 
    if(!PS_IsPositiveFinite(model.stop_loss))
      {
+      calc.issue=PS_CALC_ISSUE_STOP;
       error="Stop-loss must be a positive finite price.";
       return(false);
      }
@@ -353,11 +368,13 @@ bool PS_RiskValidateProtectivePrices(const PSModel &model,const PSMarketSnapshot
      {
       if(model.stop_loss>=calc.effective_entry-tolerance)
         {
+         calc.issue=PS_CALC_ISSUE_STOP;
          error="Long stop-loss must be below the effective entry.";
          return(false);
         }
       if(calc.tp_enabled && model.take_profit<=calc.effective_entry+tolerance)
         {
+         calc.issue=PS_CALC_ISSUE_TAKE_PROFIT;
          error="Long take-profit must be above the effective entry.";
          return(false);
         }
@@ -366,11 +383,13 @@ bool PS_RiskValidateProtectivePrices(const PSModel &model,const PSMarketSnapshot
      {
       if(model.stop_loss<=calc.effective_entry+tolerance)
         {
+         calc.issue=PS_CALC_ISSUE_STOP;
          error="Short stop-loss must be above the effective entry.";
          return(false);
         }
       if(calc.tp_enabled && model.take_profit>=calc.effective_entry-tolerance)
         {
+         calc.issue=PS_CALC_ISSUE_TAKE_PROFIT;
          error="Short take-profit must be below the effective entry.";
          return(false);
         }
@@ -378,11 +397,13 @@ bool PS_RiskValidateProtectivePrices(const PSModel &model,const PSMarketSnapshot
 
    if((market.order_mode & SYMBOL_ORDER_SL)!=SYMBOL_ORDER_SL)
      {
+      calc.issue=PS_CALC_ISSUE_ORDER_MODE;
       error="The broker does not allow Stop Loss for this symbol.";
       return(false);
      }
    if(calc.tp_enabled && (market.order_mode & SYMBOL_ORDER_TP)!=SYMBOL_ORDER_TP)
      {
+      calc.issue=PS_CALC_ISSUE_ORDER_MODE;
       error="The broker does not allow Take Profit for this symbol.";
       return(false);
      }
@@ -394,11 +415,13 @@ bool PS_RiskValidateProtectivePrices(const PSModel &model,const PSMarketSnapshot
         {
          if(calc.effective_entry-model.stop_loss+PS_DOUBLE_EPS<minimum)
            {
+            calc.issue=PS_CALC_ISSUE_STOP_DISTANCE;
             error="Stop-loss is inside the broker stop/freeze distance from pending Entry.";
             return(false);
            }
          if(calc.tp_enabled && model.take_profit-calc.effective_entry+PS_DOUBLE_EPS<minimum)
            {
+            calc.issue=PS_CALC_ISSUE_TAKE_PROFIT;
             error="Take-profit is inside the broker stop/freeze distance from pending Entry.";
             return(false);
            }
@@ -407,11 +430,13 @@ bool PS_RiskValidateProtectivePrices(const PSModel &model,const PSMarketSnapshot
         {
          if(model.stop_loss-calc.effective_entry+PS_DOUBLE_EPS<minimum)
            {
+            calc.issue=PS_CALC_ISSUE_STOP_DISTANCE;
             error="Stop-loss is inside the broker stop/freeze distance from pending Entry.";
             return(false);
            }
          if(calc.tp_enabled && calc.effective_entry-model.take_profit+PS_DOUBLE_EPS<minimum)
            {
+            calc.issue=PS_CALC_ISSUE_TAKE_PROFIT;
             error="Take-profit is inside the broker stop/freeze distance from pending Entry.";
             return(false);
            }
@@ -423,11 +448,13 @@ bool PS_RiskValidateProtectivePrices(const PSModel &model,const PSMarketSnapshot
      {
       if(market.tick.bid-model.stop_loss+PS_DOUBLE_EPS<minimum)
         {
+         calc.issue=PS_CALC_ISSUE_STOP_DISTANCE;
          error="Long stop-loss is inside the broker stop/freeze distance from Bid.";
          return(false);
         }
       if(calc.tp_enabled && model.take_profit-market.tick.bid+PS_DOUBLE_EPS<minimum)
         {
+         calc.issue=PS_CALC_ISSUE_TAKE_PROFIT;
          error="Long take-profit is inside the broker stop/freeze distance from Bid.";
          return(false);
         }
@@ -436,11 +463,13 @@ bool PS_RiskValidateProtectivePrices(const PSModel &model,const PSMarketSnapshot
      {
       if(model.stop_loss-market.tick.ask+PS_DOUBLE_EPS<minimum)
         {
+         calc.issue=PS_CALC_ISSUE_STOP_DISTANCE;
          error="Short stop-loss is inside the broker stop/freeze distance from Ask.";
          return(false);
         }
       if(calc.tp_enabled && market.tick.ask-model.take_profit+PS_DOUBLE_EPS<minimum)
         {
+         calc.issue=PS_CALC_ISSUE_TAKE_PROFIT;
          error="Short take-profit is inside the broker stop/freeze distance from Ask.";
          return(false);
         }
@@ -661,19 +690,39 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
    ulong started=GetMicrosecondCount();
    ZeroMemory(calc);
    calc.valid=false;
+   calc.issue=PS_CALC_ISSUE_NONE;
    calc.quote_valid=market.tick_valid;
    calc.error="";
    calc.notice="";
 
    if(!market.symbol_ready)
      {
+      calc.issue=PS_CALC_ISSUE_QUOTE;
       calc.error=(market.error!="" ? market.error : "Symbol properties are not ready.");
+      PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
+      return(false);
+     }
+
+   if(!market.terminal_trade_allowed || !market.mql_trade_allowed ||
+      !market.account_trade_allowed || !market.account_expert_allowed)
+     {
+      calc.issue=PS_CALC_ISSUE_PERMISSION;
+      calc.error="Automated trading is disabled by the terminal, EA, or account permissions.";
+      PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
+      return(false);
+     }
+
+   if(market.session_known && !market.session_open)
+     {
+      calc.issue=PS_CALC_ISSUE_SESSION;
+      calc.error="The market session is closed for this symbol.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
      }
 
    if(market.account_margin_mode!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING && market.current_symbol_positions>0)
      {
+      calc.issue=PS_CALC_ISSUE_NETTING;
       calc.error="A netting/exchange position already exists on this symbol. New LotCraft orders are blocked because they would aggregate, reduce, or reverse that position and apply SL/TP to the combined position.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
@@ -685,6 +734,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
 
    if(!PS_IsPositiveFinite(calc.account_basis))
      {
+      calc.issue=PS_CALC_ISSUE_UNKNOWN;
       calc.error="The selected account-money basis must be positive and finite.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
@@ -694,6 +744,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
      {
       if(!PS_IsPositiveFinite(model.requested_risk_percent))
         {
+         calc.issue=PS_CALC_ISSUE_UNKNOWN;
          calc.error="Requested Risk, % must be positive and finite.";
          PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
          return(false);
@@ -706,6 +757,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
      {
       if(!PS_IsPositiveFinite(model.requested_risk_money))
         {
+         calc.issue=PS_CALC_ISSUE_UNKNOWN;
          calc.error="Requested Risk, money must be positive and finite.";
          PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
          return(false);
@@ -718,12 +770,14 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
    string error="";
    if(!PS_RiskResolveOrder(model,market,calc,error))
      {
+      if(calc.issue==PS_CALC_ISSUE_NONE) calc.issue=PS_CALC_ISSUE_UNKNOWN;
       calc.error=error;
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
      }
    if(!PS_RiskValidateProtectivePrices(model,market,calc,error))
      {
+      if(calc.issue==PS_CALC_ISSUE_NONE) calc.issue=PS_CALC_ISSUE_UNKNOWN;
       calc.error=error;
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
@@ -731,6 +785,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
 
    if(!PS_IsFinite(model.commission_per_lot) || model.commission_per_lot<0.0)
      {
+      calc.issue=PS_CALC_ISSUE_UNKNOWN;
       calc.error="Commission/lot must be zero or a positive finite amount.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
@@ -744,6 +799,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
    ResetLastError();
    if(!OrderCalcProfit(profit_type,market.symbol,1.0,calc.effective_entry,model.stop_loss,profit))
      {
+      calc.issue=PS_CALC_ISSUE_VOLUME;
       calc.error=StringFormat("OrderCalcProfit failed for one lot (error %d).",GetLastError());
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
@@ -751,6 +807,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
    double price_loss=MathAbs(profit);
    if(!PS_IsPositiveFinite(price_loss))
      {
+      calc.issue=PS_CALC_ISSUE_STOP;
       calc.error="The one-lot loss from Entry to Stop is zero or invalid.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
@@ -758,6 +815,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
    calc.one_lot_loss=price_loss+calc.commission_risk_per_lot;
    if(!PS_IsPositiveFinite(calc.one_lot_loss))
      {
+      calc.issue=PS_CALC_ISSUE_VOLUME;
       calc.error="The one-lot risk including commission is invalid.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
@@ -774,6 +832,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
      }
    if(volume_cap+market.volume_step*1.0e-9<market.volume_min)
      {
+      calc.issue=PS_CALC_ISSUE_VOLUME;
       calc.error="No broker-valid volume remains under the symbol maximum or aggregate directional volume limit.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
@@ -788,6 +847,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
       calc.volume=PS_FloorVolume(calc.raw_volume,market.volume_min,volume_cap,market.volume_step);
    if(calc.volume<=0.0)
      {
+      calc.issue=PS_CALC_ISSUE_VOLUME;
       calc.error="A broker-valid volume could not be calculated.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
@@ -800,6 +860,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
       double reduced=PS_FloorVolume(calc.volume-market.volume_step,market.volume_min,volume_cap,market.volume_step);
       if(reduced<=0.0)
         {
+         calc.issue=PS_CALC_ISSUE_VOLUME;
          calc.error="The minimum broker volume would exceed requested risk after rounding.";
          PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
          return(false);
@@ -808,6 +869,7 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
       calc.actual_money=calc.one_lot_loss*calc.volume;
       if(calc.actual_money>calc.requested_money+risk_tolerance)
         {
+         calc.issue=PS_CALC_ISSUE_VOLUME;
          calc.error="A broker-valid downward-normalized volume could not be proven within requested risk.";
          PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
          return(false);

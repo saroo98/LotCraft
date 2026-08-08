@@ -755,6 +755,65 @@ string PS_MoneyText(const double value,const PSMarketSnapshot &market)
    return(DoubleToString(value,market.currency_digits));
   }
 
+string PS_GroupDecimalText(const string source)
+  {
+   if(source=="") return(source);
+   int point=StringFind(source,".");
+   string whole=(point>=0 ? StringSubstr(source,0,point) : source);
+   string fraction=(point>=0 ? StringSubstr(source,point) : "");
+   string sign="";
+   if(StringLen(whole)>0 && StringSubstr(whole,0,1)=="-")
+     {
+      sign="-";
+      whole=StringSubstr(whole,1);
+     }
+   int length=StringLen(whole);
+   string grouped="";
+   for(int i=0;i<length;i++)
+     {
+      if(i>0 && ((length-i)%3)==0) grouped+=",";
+      grouped+=StringSubstr(whole,i,1);
+     }
+   return(sign+grouped+fraction);
+  }
+
+string PS_CurrencyAdornment(const string code)
+  {
+   if(code=="USD") return("$");
+   if(code=="GBP") return("£");
+   if(code=="EUR") return("€");
+   if(code=="JPY") return("¥");
+   return(code);
+  }
+
+string PS_FormatMoneyDisplay(const double value,const PSMarketSnapshot &market)
+  {
+   if(!PS_IsFinite(value)) return("—");
+   string sign=(value<0.0 ? "−" : "");
+   string amount=PS_GroupDecimalText(DoubleToString(MathAbs(value),market.currency_digits));
+   string mark=PS_CurrencyAdornment(market.account_currency);
+   if(StringLen(mark)==1) return(sign+mark+amount);
+   return(sign+amount+" "+mark);
+  }
+
+string PS_CalcIssueText(const PSCalcIssue issue)
+  {
+   switch(issue)
+     {
+      case PS_CALC_ISSUE_QUOTE: return("Waiting for quote");
+      case PS_CALC_ISSUE_SESSION: return("Market closed");
+      case PS_CALC_ISSUE_PERMISSION: return("Trading disabled");
+      case PS_CALC_ISSUE_ENTRY: return("Invalid entry");
+      case PS_CALC_ISSUE_STOP: return("Invalid SL");
+      case PS_CALC_ISSUE_STOP_DISTANCE: return("SL too close");
+      case PS_CALC_ISSUE_TAKE_PROFIT: return("Invalid TP");
+      case PS_CALC_ISSUE_VOLUME: return("Volume unavailable");
+      case PS_CALC_ISSUE_NETTING: return("Netting conflict");
+      case PS_CALC_ISSUE_ORDER_MODE: return("Order unavailable");
+      default: return("Check settings");
+     }
+  }
+
 string PS_PercentText(const double value)
   {
    if(!PS_IsFinite(value)) return("—");

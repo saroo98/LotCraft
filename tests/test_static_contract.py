@@ -139,6 +139,22 @@ def test_ui_uses_shared_dpi_metrics_and_symmetric_controls():
     assert "const int action_w=(content_w-action_gap)/2;" in ui
 
 
+def test_trade_clarity_uses_typed_issues_and_shared_currency_formatting():
+    types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
+    risk = (SRC / "PS_Risk.mqh").read_text(encoding="utf-8")
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    for token in (
+        "string PS_CurrencyAdornment",
+        "string PS_FormatMoneyDisplay",
+        "string PS_GroupDecimalText",
+        "string PS_CalcIssueText",
+    ):
+        assert token in types
+    assert "calc.issue=PS_CALC_ISSUE_NONE;" in risk
+    assert "string PS_UITradeText" in ui
+    assert '"Risk, "+PS_CurrencyAdornment(market.account_currency)' in ui
+
+
 def test_exact_internal_interactive_control_inventory():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     body = re.search(r"enum PSControlId\s*\{(.*?)\};", types, re.S).group(1)

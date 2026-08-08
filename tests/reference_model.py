@@ -513,3 +513,18 @@ def parse_number(raw: str) -> tuple[bool, float, bool]:
 def switch_account_mode(model: Model, mode: AccountMode) -> Model:
     """Reference helper showing that the stored Manual amount is untouched."""
     return replace(model, account_mode=mode)
+
+
+def short_issue(issue: str) -> str:
+    return {
+        "quote": "Waiting for quote",
+        "session": "Market closed",
+        "permission": "Trading disabled",
+        "entry": "Invalid entry",
+        "stop": "Invalid SL",
+        "stop_distance": "SL too close",
+        "take_profit": "Invalid TP",
+        "volume": "Volume unavailable",
+        "netting": "Netting conflict",
+        "order_mode": "Order unavailable",
+    }.get(issue, "Check settings")

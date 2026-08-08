@@ -81,6 +81,24 @@ def test_no_ea_input_parameters_or_extra_visible_native_controls():
     assert "OBJ_BITMAP_LABEL" not in code
 
 
+def test_exposure_types_and_calc_issue_are_typed():
+    types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
+    for token in (
+        "enum PSExposureKind",
+        "enum PSExposureStatus",
+        "enum PSExposureScope",
+        "enum PSExposureHit",
+        "enum PSCalcIssue",
+        "struct PSExposureItem",
+        "struct PSExposureSnapshot",
+        "struct PSExposureUIState",
+        "PSCalcIssue issue;",
+        "void PS_ExposureReset",
+        "void PS_ExposureUIReset",
+    ):
+        assert token in types
+
+
 def test_exact_internal_interactive_control_inventory():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     body = re.search(r"enum PSControlId\s*\{(.*?)\};", types, re.S).group(1)

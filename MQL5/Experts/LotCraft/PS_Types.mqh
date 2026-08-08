@@ -133,6 +133,53 @@ enum PSLevelId
    PS_LEVEL_TAKE=2
   };
 
+enum PSExposureKind
+  {
+   PS_EXPOSURE_POSITION=0,
+   PS_EXPOSURE_PENDING=1
+  };
+
+enum PSExposureStatus
+  {
+   PS_EXPOSURE_VALID=0,
+   PS_EXPOSURE_NO_SL=1,
+   PS_EXPOSURE_UNAVAILABLE=2
+  };
+
+enum PSExposureScope
+  {
+   PS_EXPOSURE_SCOPE_CHART=0,
+   PS_EXPOSURE_SCOPE_ACCOUNT=1
+  };
+
+enum PSExposureHit
+  {
+   PS_EXPOSURE_HIT_NONE=0,
+   PS_EXPOSURE_HIT_CLOSE,
+   PS_EXPOSURE_HIT_SCOPE_CHART,
+   PS_EXPOSURE_HIT_SCOPE_ACCOUNT,
+   PS_EXPOSURE_HIT_LABELS_TOGGLE,
+   PS_EXPOSURE_HIT_SCROLL_UP,
+   PS_EXPOSURE_HIT_SCROLL_DOWN,
+   PS_EXPOSURE_HIT_ROW
+  };
+
+enum PSCalcIssue
+  {
+   PS_CALC_ISSUE_NONE=0,
+   PS_CALC_ISSUE_QUOTE,
+   PS_CALC_ISSUE_SESSION,
+   PS_CALC_ISSUE_PERMISSION,
+   PS_CALC_ISSUE_ENTRY,
+   PS_CALC_ISSUE_STOP,
+   PS_CALC_ISSUE_STOP_DISTANCE,
+   PS_CALC_ISSUE_TAKE_PROFIT,
+   PS_CALC_ISSUE_VOLUME,
+   PS_CALC_ISSUE_NETTING,
+   PS_CALC_ISSUE_ORDER_MODE,
+   PS_CALC_ISSUE_UNKNOWN
+  };
+
 struct PSRect
   {
    int x;
@@ -188,6 +235,56 @@ struct PSMarketSnapshot
    string error;
   };
 
+struct PSExposureItem
+  {
+   PSExposureKind kind;
+   PSExposureStatus status;
+   ulong ticket;
+   string symbol;
+   PSDirection direction;
+   double volume;
+   double entry;
+   double stop_loss;
+   double projected_result;
+   double loss_money;
+   double loss_percent;
+  };
+
+struct PSExposureSnapshot
+  {
+   PSExposureItem items[];
+   double equity_basis;
+   double chart_loss_money;
+   double account_loss_money;
+   double chart_loss_percent;
+   double account_loss_percent;
+   int chart_protected;
+   int account_protected;
+   int chart_no_sl;
+   int account_no_sl;
+   int chart_unavailable;
+   int account_unavailable;
+   ulong fingerprint;
+   ulong calculated_at_ms;
+  };
+
+struct PSExposureUIState
+  {
+   bool details_open;
+   bool chart_labels_visible;
+   PSExposureScope scope;
+   int scroll_offset;
+   int hovered_row;
+   PSRect sidecar_rect;
+   PSRect scope_chart_rect;
+   PSRect scope_account_rect;
+   PSRect labels_toggle_rect;
+   PSRect close_rect;
+   PSRect scroll_up_rect;
+   PSRect scroll_down_rect;
+   PSRect row_rects[8];
+  };
+
 struct PSModel
   {
    PSDirection direction;
@@ -214,6 +311,7 @@ struct PSModel
 struct PSCalcResult
   {
    bool valid;
+   PSCalcIssue issue;
    bool quote_valid;
    bool tp_enabled;
    bool volume_capped;
@@ -341,6 +439,34 @@ struct PSSlTarget
    ENUM_ORDER_TYPE_TIME type_time;
    ENUM_ORDER_TYPE_FILLING type_filling;
   };
+
+void PS_ExposureReset(PSExposureSnapshot &snapshot)
+  {
+   ArrayResize(snapshot.items,0);
+   snapshot.equity_basis=0.0;
+   snapshot.chart_loss_money=0.0;
+   snapshot.account_loss_money=0.0;
+   snapshot.chart_loss_percent=0.0;
+   snapshot.account_loss_percent=0.0;
+   snapshot.chart_protected=0;
+   snapshot.account_protected=0;
+   snapshot.chart_no_sl=0;
+   snapshot.account_no_sl=0;
+   snapshot.chart_unavailable=0;
+   snapshot.account_unavailable=0;
+   snapshot.fingerprint=0;
+   snapshot.calculated_at_ms=0;
+  }
+
+void PS_ExposureUIReset(PSExposureUIState &state)
+  {
+   ZeroMemory(state);
+   state.details_open=false;
+   state.chart_labels_visible=true;
+   state.scope=PS_EXPOSURE_SCOPE_CHART;
+   state.scroll_offset=0;
+   state.hovered_row=-1;
+  }
 
 // Explicit copies avoid compiler-version-dependent implicit copy construction for
 // structures that contain strings or nested trade structures.

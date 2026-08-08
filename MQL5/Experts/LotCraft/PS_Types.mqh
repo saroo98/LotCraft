@@ -2,13 +2,13 @@
 #define __LOTCRAFT_PS_TYPES_MQH__
 
 #define PS_PRODUCT_NAME              "LotCraft"
-#define PS_VERSION_TEXT              "1.1.0"
+#define PS_VERSION_TEXT              "1.2.0"
 #define PS_SOURCE_NAME               "LotCraft.mq5"
 #define PS_BINARY_NAME               "LotCraft.ex5"
 #define PS_LOG_PREFIX                "LotCraft"
 #define PS_OBJECT_NAMESPACE          "LotCraft.v100"
 #define PS_STATE_NAMESPACE           "LotCraft.100"
-#define PS_REQUEST_COMMENT           "LotCraft 1.1.0"
+#define PS_REQUEST_COMMENT           "LotCraft 1.2.0"
 
 #define PS_DIAGNOSTICS               0
 #define PS_POINTER_BUDGET_US         2000
@@ -82,6 +82,7 @@ enum PSControlId
   {
    PS_CTRL_NONE=-1,
    PS_CTRL_MANUAL=0,
+   PS_CTRL_FULL,
    PS_CTRL_COMPACT,
    PS_CTRL_MINI,
    PS_CTRL_THEME,

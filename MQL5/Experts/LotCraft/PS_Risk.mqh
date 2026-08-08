@@ -20,7 +20,7 @@ double PS_ModelDefaultLevelDistance(const double reference,const PSMarketSnapsho
 
 double PS_ModelPendingLegGap(const PSMarketSnapshot &market)
   {
-   if(!market.tick_valid || !PS_IsPositiveFinite(market.tick_size)) return(0.0);
+   if(!PS_MarketHasUsableQuote(market) || !PS_IsPositiveFinite(market.tick_size)) return(0.0);
    double spread=MathMax(0.0,market.tick.ask-market.tick.bid);
    return(MathMax(PS_MarketProtectiveDistance(market,true)+4.0*market.tick_size,
                   MathMax(8.0*market.tick_size,2.0*spread)));
@@ -98,10 +98,10 @@ void PS_ModelInitialize(PSModel &model,const PSMarketSnapshot &market)
    model.theme_mode=PS_THEME_DARK;
    model.ask_confirmation=true;
    model.lines_visible=true;
-   model.entry=(market.tick_valid ? PS_NormalizePrice(market.tick.ask,market) : 0.0);
+   model.entry=(PS_MarketHasUsableQuote(market) ? PS_NormalizePrice(market.tick.ask,market) : 0.0);
 
    double distance=PS_ModelDefaultLevelDistance(model.entry,market);
-   if(market.tick_valid)
+   if(PS_MarketHasUsableQuote(market))
       model.stop_loss=PS_NormalizePrice(market.tick.bid-distance,market);
    else
       model.stop_loss=0.0;
@@ -117,7 +117,7 @@ void PS_ModelInitialize(PSModel &model,const PSMarketSnapshot &market)
 
 bool PS_ModelEnsureInitialPrices(PSModel &model,const PSMarketSnapshot &market)
   {
-   if(!market.tick_valid || !PS_IsPositiveFinite(market.tick_size)) return(false);
+   if(!PS_MarketHasUsableQuote(market) || !PS_IsPositiveFinite(market.tick_size)) return(false);
    bool changed=false;
    double executable=(model.direction==PS_DIRECTION_LONG ? market.tick.ask : market.tick.bid);
    executable=PS_NormalizePrice(executable,market);
@@ -221,13 +221,14 @@ bool PS_ModelAlignDirectionToStop(PSModel &model,const PSMarketSnapshot &market)
    return(true);
   }
 
-bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSCalcResult &calc,string &error)
+bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSCalcResult &calc,string &error,
+                         const bool require_current_quote=true)
   {
    error="";
    calc.pending_ambiguous=false;
    if(model.order_mode==PS_ORDER_INSTANT)
      {
-      if(!market.tick_valid)
+       if(require_current_quote && !market.tick_valid)
         {
          calc.issue=PS_CALC_ISSUE_QUOTE;
          error=(market.error!="" ? market.error : "A current quote is required for an Instant order.");
@@ -251,7 +252,7 @@ bool PS_RiskResolveOrder(const PSModel &model,const PSMarketSnapshot &market,PSC
       error="Pending Entry must be a positive finite price.";
       return(false);
      }
-   if(!market.tick_valid)
+    if(require_current_quote && !market.tick_valid)
      {
       calc.issue=PS_CALC_ISSUE_QUOTE;
       error=(market.error!="" ? market.error : "A current quote is required to infer the pending-order subtype.");
@@ -481,7 +482,7 @@ bool PS_ModelValidateCandidate(const PSModel &candidate,const PSMarketSnapshot &
   {
    PSCalcResult validation;
    ZeroMemory(validation);
-   if(!PS_RiskResolveOrder(candidate,market,validation,error)) return(false);
+   if(!PS_RiskResolveOrder(candidate,market,validation,error,false)) return(false);
    return(PS_RiskValidateProtectivePrices(candidate,market,validation,error));
   }
 
@@ -554,7 +555,7 @@ bool PS_ModelBuildFreshSymbolPlan(PSModel &model,const PSMarketSnapshot &market,
                                   const int chart_height,string &error)
   {
    error="";
-   if(market.symbol=="" || !market.symbol_ready || !market.tick_valid ||
+    if(market.symbol=="" || !market.symbol_ready || !PS_MarketHasUsableQuote(market) ||
       !PS_IsPositiveFinite(market.tick_size) || market.digits<0)
      {
       error=(market.error!="" ? market.error : "A synchronized symbol and current quote are required to build a planning setup.");
@@ -626,7 +627,7 @@ bool PS_ModelChangeOrderMode(PSModel &model,const PSMarketSnapshot &market,
   {
    error="";
    if(model.order_mode==new_mode) return(true);
-   if(!market.tick_valid || !PS_IsPositiveFinite(market.tick_size))
+    if(!PS_MarketHasUsableQuote(market) || !PS_IsPositiveFinite(market.tick_size))
      {
       error=(market.error!="" ? market.error : "A current quote is required to change order mode.");
       return(false);

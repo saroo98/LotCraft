@@ -55,11 +55,11 @@ def test_product_identity_is_consistent():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     assert '#property copyright "LotCraft"' in main
     # MetaEditor accepts only a two-part numeric #property version. The
-    # user-facing semantic release is 1.1.0 while persistence remains schema v100.
-    assert '#property version   "1.10"' in main
-    assert '#property description "LotCraft 1.1.0"' in main
+    # user-facing semantic release is 1.2.0 while persistence remains schema v100.
+    assert '#property version   "1.20"' in main
+    assert '#property description "LotCraft 1.2.0"' in main
     assert '#define PS_PRODUCT_NAME              "LotCraft"' in types
-    assert '#define PS_VERSION_TEXT              "1.1.0"' in types
+    assert '#define PS_VERSION_TEXT              "1.2.0"' in types
     assert '#define PS_SOURCE_NAME               "LotCraft.mq5"' in types
     assert '#define PS_BINARY_NAME               "LotCraft.ex5"' in types
     assert '#define PS_LOG_PREFIX                "LotCraft"' in types
@@ -167,7 +167,9 @@ def test_order_mode_and_lines_use_semantic_colors():
     assert "PS_ThemeAction()" in ui
     assert "PS_ThemeLoss()" in ui
     assert "PS_ThemeIncomplete()" in ui
-    assert "model.lines_visible ? PS_ThemeControl() : PS_ThemeAction()" in ui
+    assert "PS_PremiumLinesStateButton" in ui
+    assert "PS_ThemeLabelBlue()" in ui
+    assert "model.lines_visible ? PS_ThemeLabelBlue() : PS_ThemeText()" in ui
 
 
 def test_exact_internal_interactive_control_inventory():
@@ -176,7 +178,7 @@ def test_exact_internal_interactive_control_inventory():
     controls = [part.strip().split("=")[0].strip() for part in body.split(",") if part.strip()]
     controls = [c for c in controls if c not in {"PS_CTRL_NONE", "PS_CTRL_COUNT"}]
     expected = [
-        "PS_CTRL_MANUAL", "PS_CTRL_COMPACT", "PS_CTRL_MINI", "PS_CTRL_THEME", "PS_CTRL_CLOSE", "PS_CTRL_DIRECTION",
+        "PS_CTRL_MANUAL", "PS_CTRL_FULL", "PS_CTRL_COMPACT", "PS_CTRL_MINI", "PS_CTRL_THEME", "PS_CTRL_CLOSE", "PS_CTRL_DIRECTION",
         "PS_CTRL_ENTRY_FIELD", "PS_CTRL_ENTRY_MINUS", "PS_CTRL_ENTRY_PLUS", "PS_CTRL_ENTRY_COPY",
         "PS_CTRL_STOP_FIELD", "PS_CTRL_STOP_MINUS", "PS_CTRL_STOP_PLUS", "PS_CTRL_STOP_COPY",
         "PS_CTRL_TAKE_FIELD", "PS_CTRL_TAKE_MINUS", "PS_CTRL_TAKE_PLUS", "PS_CTRL_TAKE_COPY",
@@ -195,6 +197,10 @@ def test_exposure_summary_is_full_and_compact_only():
     assert "PS_CTRL_EXPOSURE_SUMMARY" in types
     assert "PS_UIExposureMetric" in ui
     assert "PS_UIExposureSummary" in ui
+    assert "int gap=PS_U(compact ? 4 : 6);" in ui
+    assert "int label_y=rect.y+PS_U(compact ? 6 : 8);" in ui
+    assert "int percent_y=rect.y+PS_U(compact ? 20 : 23);" in ui
+    assert "int money_y=rect.y+PS_U(compact ? 34 : 38);" in ui
     mini = ui[ui.index("void PS_PremiumRenderMini"):ui.index("void PS_UIPremiumRender")]
     assert "PS_UIExposureSummary" not in mini
 
@@ -202,10 +208,28 @@ def test_exposure_summary_is_full_and_compact_only():
 def test_exposure_summary_geometry_and_interaction_contract():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
-    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(20),y+PS_U(367),PS_U(398),PS_U(38)" in ui
-    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(8),y+PS_U(333),PS_U(356),PS_U(32)" in ui
-    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(423)" in ui
-    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(377)" in ui
+    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(18),y+PS_U(379),PS_U(402),PS_U(48)" in ui
+    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(14),y+PS_U(342),PS_U(344),PS_U(42)" in ui
+    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(437)" in ui
+    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(392)" in ui
+    assert 'PS_UIExposureTile(chart_rect,"Current chart"' in ui
+    assert 'PS_UIExposureTile(account_rect,"Whole account"' in ui
+
+
+def test_closed_markets_keep_planning_prices_but_block_live_submission():
+    market = (SRC / "PS_Market.mqh").read_text(encoding="utf-8")
+    risk = (SRC / "PS_Risk.mqh").read_text(encoding="utf-8")
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    assert "if(!market.tick_valid)" in market
+    assert "SymbolInfoDouble(market.symbol,SYMBOL_BID)" in market
+    assert "iClose(market.symbol,PERIOD_CURRENT,0)" in market
+    assert "market.tick_valid=false" in market
+    assert "PS_MarketHasUsableQuote(market)" in risk
+    assert "PS_RiskResolveOrder(candidate,market,validation,error,false)" in risk
+    assert 'return("Market closed")' in ui
+    assert 'return("Waiting for live quote")' in ui
+    assert "if(control==PS_CTRL_TRADE && !g_calc.valid)" in main
     assert "case PS_CTRL_EXPOSURE_SUMMARY:" in main
     assert "g_exposure_ui.details_open=!g_exposure_ui.details_open;" in main
     assert "g_exposure_ui.scroll_offset=0;" in main
@@ -230,9 +254,9 @@ def test_exposure_sidecar_persists_preferences_not_financial_data():
         assert forbidden not in persistence
 
 
-def test_chart_exposure_labels_use_one_canvas_and_positions_only():
+def test_chart_exposure_labels_use_bounded_reusable_canvases_and_positions_only():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
-    assert "CCanvas g_ps_exposure_labels_canvas;" in ui
+    assert "CCanvas g_ps_exposure_label_canvas[PS_EXPOSURE_LABEL_MAX];" in ui
     assert "item.kind!=PS_EXPOSURE_POSITION" in ui
     assert "item.symbol!=_Symbol" in ui
     assert "item.status!=PS_EXPOSURE_VALID" in ui
@@ -241,12 +265,37 @@ def test_chart_exposure_labels_use_one_canvas_and_positions_only():
     assert "ObjectsDeleteAll" not in render
 
 
+def test_chart_exposure_labels_never_allocate_a_chart_sized_argb_surface():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    ensure = ui[ui.index("bool PS_UIExposureLabelsCanvasEnsure"):ui.index("string PS_UITradeText")]
+    assert "ui.chart_w,ui.chart_h" not in ensure
+    assert "COLOR_FORMAT_ARGB" not in ensure
+    assert "COLOR_FORMAT_XRGB_NOALPHA" in ensure
+
+
 def test_chart_exposure_label_click_keeps_handle_precedence():
     main = MAIN.read_text(encoding="utf-8")
     press = re.search(r"void PS_MousePress.*?\n  \}", main, re.S).group(0)
     assert press.index("PS_UIHitHandle") < press.index("PS_UIExposureLabelHitTest")
     assert "g_exposure_ui.details_open=true;" in main
     assert "g_exposure_ui.scope=PS_EXPOSURE_SCOPE_CHART;" in main
+
+
+def test_symbol_transition_hides_every_canvas_surface_until_render_can_resume():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    hide = ui[ui.index("void PS_UIHidePanelContent"):ui.index("uint PS_UICanvasColor")]
+    assert "g_ps_panel_canvas_name" in hide
+    assert "g_ps_exposure_canvas_name" in hide
+    assert "PS_UIExposureLabelsHideFrom(0)" in hide
+    assert "g_ps_drag_canvas_name" in hide
+    assert "OBJ_NO_PERIODS" in hide
+
+
+def test_stale_quote_transition_renders_an_explicit_waiting_panel():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    assert "void PS_UIRenderWaitingPanel" in ui
+    assert main.count("PS_UIRenderWaitingPanel(g_ui,g_model,") >= 3
 
 
 def test_hover_and_press_redraw_only_when_state_changes():
@@ -312,16 +361,20 @@ def test_compact_full_panel_omits_unneeded_summary_and_commission_rows():
     assert "g_ps_metrics.mini_w=PS_U(360);" in metrics
     assert "g_ps_metrics.mini_h=PS_U(92);" in metrics
     assert "g_ps_metrics.compact_w=PS_U(372);" in metrics
-    assert "g_ps_metrics.compact_h=PS_U(459);" in metrics
+    assert "g_ps_metrics.compact_h=PS_U(470);" in metrics
     assert "g_ps_metrics.full_w=PS_U(438);" in metrics
-    assert "g_ps_metrics.full_h=PS_U(517);" in metrics
+    assert "g_ps_metrics.full_h=PS_U(529);" in metrics
     assert "PS_CTRL_COMMISSION_MODE" not in layout
     assert "PS_CTRL_COMMISSION_FIELD" not in layout
     assert "PS_CTRL_ACTUAL_PERCENT" not in layout
-    assert "PS_CTRL_ACTUAL_MONEY" not in layout
+    assert "PS_CTRL_ACTUAL_MONEY],x+PS_U(239),y+PS_U(276),PS_U(117),PS_U(26)" in layout
+    assert "PS_CTRL_ACTUAL_MONEY],x+PS_U(281),y+PS_U(305),PS_U(137),PS_U(28)" in layout
     assert '"Commission/lot",true' not in render
     assert '"Actual risk, %",true' not in render
     assert '"Actual, "+market.account_currency,true' not in render
+    assert '"Target risk"' in ui
+    assert '"Actual SL loss"' in ui
+    assert "PS_UIActualRiskMoneyDisplay(calc,market)" in ui
     assert "g_model.commission_per_lot=0.0;" in init
 
 
@@ -418,15 +471,16 @@ def test_top_row_uses_direct_symmetric_controls_without_redundant_labels():
 def test_full_mode_uses_one_inset_grid_without_touching_or_crossing_borders():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     for geometry in [
-        "PS_CTRL_LINES],x+PS_U(20),y+PS_U(213),PS_U(120),PS_U(22)",
+        "PS_CTRL_LINES],x+PS_U(290),y+PS_U(213),PS_U(126),PS_U(22)",
         "PS_CTRL_ACCOUNT_MODE],x+PS_U(92),y+PS_U(255),PS_U(121),PS_U(28)",
         "PS_CTRL_ACCOUNT_FIELD],x+PS_U(219),y+PS_U(255),PS_U(199),PS_U(28)",
-        "PS_CTRL_RISK_PERCENT_FIELD],x+PS_U(92),y+PS_U(291),PS_U(121),PS_U(28)",
-        "PS_CTRL_RISK_MONEY_FIELD],x+PS_U(291),y+PS_U(291),PS_U(127),PS_U(28)",
-        "PS_CTRL_POSITION_SIZE],x+PS_U(92),y+PS_U(327),PS_U(281),PS_U(28)",
-        "PS_CTRL_POSITION_COPY],x+PS_U(379),y+PS_U(327),PS_U(39),PS_U(28)",
-        "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(20),y+PS_U(367),PS_U(398),PS_U(38)",
-        "PS_CTRL_TRADE],content_x,y+PS_U(467),content_w,PS_U(40)",
+        "PS_CTRL_RISK_PERCENT_FIELD],x+PS_U(20),y+PS_U(305),PS_U(109),PS_U(28)",
+        "PS_CTRL_RISK_MONEY_FIELD],x+PS_U(137),y+PS_U(305),PS_U(136),PS_U(28)",
+        "PS_CTRL_ACTUAL_MONEY],x+PS_U(281),y+PS_U(305),PS_U(137),PS_U(28)",
+        "PS_CTRL_POSITION_SIZE],x+PS_U(92),y+PS_U(341),PS_U(281),PS_U(28)",
+        "PS_CTRL_POSITION_COPY],x+PS_U(379),y+PS_U(341),PS_U(39),PS_U(28)",
+        "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(18),y+PS_U(379),PS_U(402),PS_U(48)",
+        "PS_CTRL_TRADE],content_x,y+PS_U(481),content_w,PS_U(40)",
     ]:
         assert geometry in ui
     assert "g_ps_metrics.full_h" in ui
@@ -440,14 +494,15 @@ def test_full_mode_uses_compact_visual_language_without_decorative_control_icons
     premium = re.search(r"void PS_UIPremiumRender.*?\n  \}\n\nvoid PS_UIRender", ui, re.S).group(0)
     full = premium.split("g_ps_panel_canvas.Erase(PS_PremiumColor(PS_ThemeBackground()));", 1)[1]
     assert 'PS_PremiumControlButton(ui,PS_CTRL_MANUAL,"Manual"' in full
-    assert 'PS_PremiumControlButton(ui,PS_CTRL_COMPACT,"Compact"' in full
-    assert 'PS_PremiumControlButton(ui,PS_CTRL_MINI,"Mini"' in full
+    assert 'PS_PremiumModeButton(ui,PS_CTRL_FULL,"Full",model.view_mode==PS_VIEW_FULL' in full
+    assert 'PS_PremiumModeButton(ui,PS_CTRL_COMPACT,"Compact",model.view_mode==PS_VIEW_COMPACT' in full
+    assert 'PS_PremiumModeButton(ui,PS_CTRL_MINI,"Mini",model.view_mode==PS_VIEW_MINI' in full
     assert 'PS_PremiumRoundRect(PS_U(10),PS_U(47),PS_U(418),PS_U(48)' in full
     assert 'PS_PremiumRoundRect(PS_U(10),PS_U(102),PS_U(418),PS_U(139)' in full
-    assert 'PS_PremiumRoundRect(PS_U(10),PS_U(247),PS_U(418),PS_U(168)' in full
+    assert 'PS_PremiumRoundRect(PS_U(10),PS_U(249),PS_U(418),PS_U(180)' in full
     assert "PS_PremiumCompactField(ui,PS_CTRL_ENTRY_FIELD" in full
     assert "PS_PremiumRoundRect(10,488,436,27" not in full
-    assert "PS_CTRL_TRADE],content_x,y+PS_U(467),content_w,PS_U(40)" in ui
+    assert "PS_CTRL_TRADE],content_x,y+PS_U(481),content_w,PS_U(40)" in ui
     for token in [
         "PS_PremiumLogo(",
         "PS_PremiumSlidersIcon(",
@@ -472,8 +527,8 @@ def test_full_and_compact_use_the_requested_short_labels():
             assert label in render
         for old_label in ['"Stop-loss"', '"Take-profit"', '"Order type"', '"Position size"', '"Direction"', '"Type"', '"Chart levels"']:
             assert old_label not in render
-        assert '(model.lines_visible ? "Hide lines" : "Show lines")' in render
-        assert '(model.lines_visible ? PS_ThemeControl() : PS_ThemeAction())' in render
+        assert '(model.lines_visible ? "Lines shown" : "Lines hidden")' in render
+        assert "PS_PremiumLinesStateButton" in render
     for glyph in ['"☷', '"ϟ', '"◷', '"•••', '"×']:
         assert glyph not in premium
 
@@ -659,8 +714,9 @@ def test_full_compact_and_mini_modes_are_explicit_persisted_states():
     assert "model.view_mode=(value>=0.5 ? PS_VIEW_MINI : PS_VIEW_FULL);" in persistence
     assert "case PS_CTRL_COMPACT:" in main
     assert "case PS_CTRL_MINI:" in main
-    assert "g_model.view_mode==PS_VIEW_COMPACT ? PS_VIEW_FULL : PS_VIEW_COMPACT" in main
-    assert "g_model.view_mode==PS_VIEW_MINI ? PS_VIEW_FULL : PS_VIEW_MINI" in main
+    assert "PS_SetViewModeState(PS_VIEW_FULL);" in main
+    assert "PS_SetViewModeState(PS_VIEW_COMPACT);" in main
+    assert "PS_SetViewModeState(PS_VIEW_MINI);" in main
 
 
 def test_compact_geometry_is_materially_smaller_and_single_canvas_renderer_is_preserved():
@@ -671,7 +727,7 @@ def test_compact_geometry_is_materially_smaller_and_single_canvas_renderer_is_pr
 
     assert not re.search(r"(?:x|y)\+\d+", layout)
     for control in [
-        "PS_CTRL_MANUAL", "PS_CTRL_COMPACT", "PS_CTRL_MINI", "PS_CTRL_THEME", "PS_CTRL_CLOSE",
+        "PS_CTRL_MANUAL", "PS_CTRL_FULL", "PS_CTRL_COMPACT", "PS_CTRL_MINI", "PS_CTRL_THEME", "PS_CTRL_CLOSE",
         "PS_CTRL_DIRECTION", "PS_CTRL_ORDER_MODE", "PS_CTRL_ENTRY_FIELD", "PS_CTRL_STOP_FIELD",
         "PS_CTRL_TAKE_FIELD", "PS_CTRL_LINES", "PS_CTRL_ACCOUNT_MODE", "PS_CTRL_ACCOUNT_FIELD",
         "PS_CTRL_RISK_PERCENT_FIELD", "PS_CTRL_RISK_MONEY_FIELD", "PS_CTRL_POSITION_SIZE",
@@ -683,13 +739,13 @@ def test_compact_geometry_is_materially_smaller_and_single_canvas_renderer_is_pr
     for geometry in [
         "PS_PremiumRoundRect(PS_U(8),PS_U(43),PS_U(356),PS_U(42)",
         "PS_PremiumRoundRect(PS_U(8),PS_U(91),PS_U(356),PS_U(126)",
-        "PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(146)",
+        "PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(163)",
     ]:
         assert geometry in compact
     assert "g_ps_panel_canvas.Line(9,278" not in compact
     assert "g_ps_panel_canvas.Line(9,319" not in compact
     assert "g_ps_panel_canvas.Line(181,279" not in compact
-    assert 'PS_PremiumControlButton(ui,PS_CTRL_MINI,"Mini"' in compact
+    assert 'PS_PremiumModeButton(ui,PS_CTRL_MINI,"Mini",model.view_mode==PS_VIEW_MINI' in compact
     assert "PS_PremiumRenderCompact(ui,model,calc,market,exposure,editor,copy_feedback_control);" in premium
     assert "g_ps_panel_canvas.Update(false);" in premium
     assert "OBJ_RECTANGLE_LABEL" not in compact
@@ -730,8 +786,10 @@ def test_mini_mode_edits_risk_percentage_and_offers_full_and_compact_navigation(
     assert "g_ps_control_visible[PS_CTRL_POSITION_SIZE]" not in mini_layout
     assert 'PS_PremiumText(PS_U(12),PS_U(66),"Risk, %"' in mini
     assert "PS_PremiumCompactField(ui,PS_CTRL_RISK_PERCENT_FIELD" in mini
-    assert 'PS_PremiumControlButton(ui,PS_CTRL_MINI,"Full"' in mini
-    assert 'PS_PremiumControlButton(ui,PS_CTRL_COMPACT,"Compact"' in mini
+    assert 'PS_PremiumControlButton(ui,PS_CTRL_MANUAL,"Manual"' in mini
+    assert 'PS_PremiumModeButton(ui,PS_CTRL_FULL,"Full",model.view_mode==PS_VIEW_FULL' in mini
+    assert 'PS_PremiumModeButton(ui,PS_CTRL_COMPACT,"Compact",model.view_mode==PS_VIEW_COMPACT' in mini
+    assert 'PS_PremiumModeButton(ui,PS_CTRL_MINI,"Mini",model.view_mode==PS_VIEW_MINI' in mini
 
 
 def test_rounded_rectangles_use_antialiased_corners_and_solid_accent_fills():
@@ -773,9 +831,9 @@ def test_theme_control_is_visible_in_full_compact_and_mini_modes():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     layout = re.search(r"void PS_UILayout.*?\n  \}", ui, re.S).group(0)
     for geometry in [
-        "x+PS_U(294),y+PS_U(7),PS_U(27),PS_U(28)",
-        "x+PS_U(304),y+PS_U(6),PS_U(26),PS_U(28)",
-        "x+PS_U(366),y+PS_U(7),PS_U(27),PS_U(30)",
+        "x+PS_U(288),y+PS_U(7),PS_U(24),PS_U(28)",
+        "x+PS_U(313),y+PS_U(6),PS_U(24),PS_U(28)",
+        "x+PS_U(368),y+PS_U(7),PS_U(27),PS_U(30)",
     ]:
         assert geometry in layout
     assert "g_ps_control_visible[PS_CTRL_THEME]=true;" in layout
@@ -972,11 +1030,15 @@ def test_captured_handle_motion_never_retests_handle_identity():
     assert "PS_UIHitHandle" not in release
 
 
-def test_risk_money_field_shows_actual_risk_in_parentheses_when_different():
+def test_risk_money_fields_separate_target_and_actual_loss_values():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     display = re.search(r"string PS_UIRiskMoneyDisplay.*?\n  \}", ui, re.S).group(0)
-    assert 'return(requested+" ("+actual+")");' in display
+    actual = re.search(r"string PS_UIActualRiskMoneyDisplay.*?\n  \}", ui, re.S).group(0)
+    assert "PS_FormatMoneyDisplay(requested,market)" in display
+    assert 'return("—");' in actual
+    assert "PS_FormatMoneyDisplay(calc.actual_money,market)" in actual
     assert ui.count("PS_UIRiskMoneyDisplay(model,calc,market,editor)") >= 3
+    assert ui.count("PS_UIActualRiskMoneyDisplay(calc,market)") >= 2
 
 
 def test_move_sl_scope_is_all_valid_current_symbol_targets_at_exact_line():
@@ -1059,7 +1121,7 @@ def test_release_source_uses_metaeditor_compatible_constant_forms():
     main = MAIN.read_text(encoding="utf-8")
     logging = (SRC / "PS_Logging.mqh").read_text(encoding="utf-8")
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
-    assert '#property version   "1.10"' in main
+    assert '#property version   "1.20"' in main
     assert not re.search(r"(?m)^\s*#if\s+(?!def\b|ndef\b)", logging)
     assert "const color text_color=C'154,164,181'" in ui
 

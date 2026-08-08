@@ -39,6 +39,17 @@ bool PS_MarketSessionState(const string symbol,const datetime server_time,bool &
    return(false);
   }
 
+// A stale quote is still useful for preserving the planning view. It must not
+// be used to submit a trade, but it gives the panel a stable Entry/SL anchor
+// while a closed market has no fresh tick.
+bool PS_MarketHasUsableQuote(const PSMarketSnapshot &market)
+  {
+   return(PS_IsPositiveFinite(market.tick.bid) &&
+          PS_IsPositiveFinite(market.tick.ask) &&
+          market.tick.ask>=market.tick.bid &&
+          market.tick.time>0);
+  }
+
 void PS_MarketCalculateDirectionalExposure(PSMarketSnapshot &market)
   {
    market.exposure_long=0.0;
@@ -127,10 +138,35 @@ bool PS_MarketAcquire(PSMarketSnapshot &market)
       market.tick_valid=false;
       market.error="The current Bid/Ask quote is invalid.";
      }
-   else if(market.tick.time<=0 || (market.server_time>market.tick.time && market.server_time-market.tick.time>PS_QUOTE_STALE_SECONDS))
+    else if(market.tick.time<=0 || (market.server_time>market.tick.time && market.server_time-market.tick.time>PS_QUOTE_STALE_SECONDS))
+      {
+       market.tick_valid=false;
+       market.error=StringFormat("The latest quote is older than %d seconds.",PS_QUOTE_STALE_SECONDS);
+      }
+
+   // Keep a closed or stale symbol usable for planning. SymbolInfoTick can
+   // reject an old quote even though the terminal still exposes the last
+   // bid/ask (or last close) for the chart. This fallback is never marked as
+   // current, so PS_RiskCalculate continues to block trade submission.
+   if(!market.tick_valid)
      {
-      market.tick_valid=false;
-      market.error=StringFormat("The latest quote is older than %d seconds.",PS_QUOTE_STALE_SECONDS);
+      double planning_bid=SymbolInfoDouble(market.symbol,SYMBOL_BID);
+      double planning_ask=SymbolInfoDouble(market.symbol,SYMBOL_ASK);
+      if(!PS_IsPositiveFinite(planning_bid) || !PS_IsPositiveFinite(planning_ask) || planning_ask<planning_bid)
+        {
+         double last=SymbolInfoDouble(market.symbol,SYMBOL_LAST);
+         if(!PS_IsPositiveFinite(last)) last=iClose(market.symbol,PERIOD_CURRENT,0);
+         planning_bid=last;
+         planning_ask=last;
+        }
+      if(PS_IsPositiveFinite(planning_bid) && PS_IsPositiveFinite(planning_ask) && planning_ask>=planning_bid)
+        {
+         market.tick.bid=planning_bid;
+         market.tick.ask=planning_ask;
+         market.tick.last=(planning_bid+planning_ask)*0.5;
+         market.tick.time=(market.server_time>0 ? market.server_time : TimeCurrent());
+         market.tick.time_msc=(long)market.tick.time*1000;
+        }
      }
 
    if(market.digits<0 || market.digits>12)

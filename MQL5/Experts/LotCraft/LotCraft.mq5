@@ -1,8 +1,8 @@
 #property strict
 #property copyright "LotCraft"
 #property link      ""
-#property version   "1.10"
-#property description "LotCraft 1.1.0"
+#property version   "1.20"
+#property description "LotCraft 1.2.0"
 #property description "Discretionary position sizing and explicit MT5 order entry assistant."
 
 #include "PS_Platform.mqh"
@@ -170,6 +170,7 @@ void PS_RefreshMarket(const bool clear_status=false)
          g_symbol_transition_pending=true;
          PS_UIHidePanelContent(g_ui);
          PS_UIHidePlanningLines(g_ui);
+         PS_UIRenderWaitingPanel(g_ui,g_model,transition_error);
          PS_LogWarningRateLimited("symbol-transition.wait",transition_error,5000);
          g_last_market_refresh_ms=GetTickCount64();
          return;
@@ -185,6 +186,7 @@ void PS_RefreshMarket(const bool clear_status=false)
            {
             PS_UIHidePanelContent(g_ui);
             PS_UIHidePlanningLines(g_ui);
+            PS_UIRenderWaitingPanel(g_ui,g_model,transition_error);
             PS_LogWarningRateLimited("symbol-transition.wait",transition_error,5000);
             g_last_market_refresh_ms=GetTickCount64();
             return;
@@ -541,6 +543,17 @@ void PS_DoMoveStops()
    PS_RefreshMarket(false);
   }
 
+void PS_SetViewModeState(const PSViewMode view_mode)
+  {
+   if(g_model.view_mode==view_mode) return;
+   g_model.view_mode=view_mode;
+   g_model.revision++;
+   PS_SaveState();
+   g_ui.dirty=true;
+   g_exposure_details_dirty=true;
+   g_exposure_labels_dirty=true;
+  }
+
 void PS_Action(const PSControlId control)
   {
    switch(control)
@@ -552,21 +565,14 @@ void PS_Action(const PSControlId control)
          else PS_SetStatus(error,true,6000);
          break;
         }
+      case PS_CTRL_FULL:
+         PS_SetViewModeState(PS_VIEW_FULL);
+         break;
       case PS_CTRL_COMPACT:
-         g_model.view_mode=(g_model.view_mode==PS_VIEW_COMPACT ? PS_VIEW_FULL : PS_VIEW_COMPACT);
-         g_model.revision++;
-         PS_SaveState();
-         g_ui.dirty=true;
-         g_exposure_details_dirty=true;
-         g_exposure_labels_dirty=true;
+         PS_SetViewModeState(PS_VIEW_COMPACT);
          break;
       case PS_CTRL_MINI:
-         g_model.view_mode=(g_model.view_mode==PS_VIEW_MINI ? PS_VIEW_FULL : PS_VIEW_MINI);
-         g_model.revision++;
-         PS_SaveState();
-         g_ui.dirty=true;
-         g_exposure_details_dirty=true;
-         g_exposure_labels_dirty=true;
+         PS_SetViewModeState(PS_VIEW_MINI);
          break;
       case PS_CTRL_THEME:
          g_model.theme_mode=(g_model.theme_mode==PS_THEME_DARK ? PS_THEME_LIGHT : PS_THEME_DARK);
@@ -647,7 +653,8 @@ void PS_Action(const PSControlId control)
          PS_DoMoveStops();
          break;
       case PS_CTRL_TRADE:
-         PS_DoTrade();
+         if(g_calc.valid) PS_DoTrade();
+         else PS_SetStatus(PS_CalcIssueText(g_calc.issue),false,2500);
          break;
       default:
          break;
@@ -858,9 +865,21 @@ void PS_MousePress(const int x,const int y)
 
    if(PS_UIInPanel(g_ui,x,y))
      {
-      PS_UIGuardEnter(g_ui);
-      PSControlId control=PS_UIHitControl(x,y);
-      g_pointer.control=control;
+       PS_UIGuardEnter(g_ui);
+       PSControlId control=PS_UIHitControl(x,y);
+       if(control==PS_CTRL_TRADE && !g_calc.valid)
+         {
+          // A closed or stale market keeps the panel usable, but the trade
+          // action must not capture the pointer or submit a request.
+          g_pointer.capture=PS_CAPTURE_NONE;
+          g_pointer.control=PS_CTRL_NONE;
+          g_pressed_control=PS_CTRL_NONE;
+          g_keyboard_focus=PS_CTRL_NONE;
+          g_panel_dirty=false;
+          PS_PerfCheck("pointer",started,PS_POINTER_BUDGET_US);
+          return;
+         }
+       g_pointer.control=control;
       g_pressed_control=control;
       g_keyboard_focus=control;
       g_panel_dirty=true;
@@ -1263,7 +1282,7 @@ int OnInit()
   {
    if(!MQLInfoInteger(MQL_DLLS_ALLOWED))
      {
-      string message="LotCraft 1.1.0 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
+      string message="LotCraft 1.2.0 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
       PS_LogError(message);
       MessageBox(message,PS_PRODUCT_NAME+" initialization",MB_OK|MB_ICONERROR);
       return(INIT_FAILED);
@@ -1335,6 +1354,8 @@ int OnInit()
      {
       PS_UIHidePanelContent(g_ui);
       PS_UIHidePlanningLines(g_ui);
+      PS_UIRenderWaitingPanel(g_ui,g_model,
+                              (g_market.error!="" ? g_market.error : "A current quote is required."));
      }
    else
      {

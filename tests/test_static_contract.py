@@ -55,11 +55,11 @@ def test_product_identity_is_consistent():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     assert '#property copyright "LotCraft"' in main
     # MetaEditor accepts only a two-part numeric #property version. The
-    # user-facing semantic release is 1.2.0 while persistence remains schema v100.
-    assert '#property version   "1.20"' in main
-    assert '#property description "LotCraft 1.2.0"' in main
+    # user-facing semantic release is 1.2.1 while persistence remains schema v100.
+    assert '#property version   "1.21"' in main
+    assert '#property description "LotCraft 1.2.1"' in main
     assert '#define PS_PRODUCT_NAME              "LotCraft"' in types
-    assert '#define PS_VERSION_TEXT              "1.2.0"' in types
+    assert '#define PS_VERSION_TEXT              "1.2.1"' in types
     assert '#define PS_SOURCE_NAME               "LotCraft.mq5"' in types
     assert '#define PS_BINARY_NAME               "LotCraft.ex5"' in types
     assert '#define PS_LOG_PREFIX                "LotCraft"' in types
@@ -122,7 +122,7 @@ def test_exposure_refresh_is_event_driven_and_not_on_pointer_motion():
     assert "void OnTradeTransaction(" in main
     assert "g_exposure_dirty=true;" in main
     assert "now-g_last_exposure_refresh_ms>=1000" in main
-    assert "void PS_CopyExposureSnapshot" in (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
+    assert "bool PS_CopyExposureSnapshot" in (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     pointer = main[main.index("void PS_MouseMoveCaptured"):main.index("void PS_MouseRelease")]
     assert "PS_ExposureCalculate" not in pointer
 
@@ -198,20 +198,20 @@ def test_exposure_summary_is_full_and_compact_only():
     assert "PS_UIExposureMetric" in ui
     assert "PS_UIExposureSummary" in ui
     assert "int gap=PS_U(compact ? 4 : 6);" in ui
-    assert "int label_y=rect.y+PS_U(compact ? 6 : 8);" in ui
-    assert "int percent_y=rect.y+PS_U(compact ? 20 : 23);" in ui
-    assert "int money_y=rect.y+PS_U(compact ? 34 : 38);" in ui
-    mini = ui[ui.index("void PS_PremiumRenderMini"):ui.index("void PS_UIPremiumRender")]
+    assert "int label_h=PS_UITextHeight(g_ps_panel_canvas,label_text,label_size);" in ui
+    assert "int percent_h=PS_UITextHeight(g_ps_panel_canvas,percent_text,percent_size);" in ui
+    assert "int money_h=PS_UITextHeight(g_ps_panel_canvas,money_text,money_size);" in ui
+    mini = ui[ui.index("void PS_PremiumRenderMini"):ui.index("bool PS_UIPremiumRender")]
     assert "PS_UIExposureSummary" not in mini
 
 
 def test_exposure_summary_geometry_and_interaction_contract():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
-    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(18),y+PS_U(379),PS_U(402),PS_U(48)" in ui
-    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(14),y+PS_U(342),PS_U(344),PS_U(42)" in ui
-    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(437)" in ui
-    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(392)" in ui
+    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(18),y+PS_U(379),PS_U(402),PS_U(66)" in ui
+    assert "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(14),y+PS_U(342),PS_U(344),PS_U(64)" in ui
+    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(455)" in ui
+    assert "PS_CTRL_CONFIRM],content_x,y+PS_U(414)" in ui
     assert 'PS_UIExposureTile(chart_rect,"Current chart"' in ui
     assert 'PS_UIExposureTile(account_rect,"Whole account"' in ui
 
@@ -241,7 +241,7 @@ def test_exposure_sidecar_is_one_canvas_with_bounded_rows():
     assert "PS_EXPOSURE_VISIBLE_ROWS=8" in ui
     assert "PS_UIExposureHitTest" in ui
     assert "CreateBitmapLabel" in ui
-    render = ui[ui.index("void PS_UIExposureSidecarRender"):ui.index("PSExposureHit PS_UIExposureHitTest")]
+    render = ui[ui.index("bool PS_UIExposureSidecarRender"):ui.index("PSExposureHit PS_UIExposureHitTest")]
     assert "PS_UIEnsureBox" not in render
     assert "ObjectCreate" not in render
 
@@ -321,7 +321,7 @@ def test_keyboard_focus_has_bounded_order_and_non_color_indicator():
 
 def test_exposure_renderers_consume_cache_and_bound_visual_content():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
-    render = ui[ui.index("void PS_UIExposureSidecarRender"):ui.index("void PS_PremiumRenderCompact")]
+    render = ui[ui.index("bool PS_UIExposureSidecarRender"):ui.index("void PS_PremiumRenderCompact")]
     for broker_call in ["PositionsTotal(", "OrdersTotal(", "PositionGetTicket(", "OrderGetTicket(", "OrderCalcProfit("]:
         assert broker_call not in render
     assert "if(top+row_h>h-PS_U(28)) break;" in render
@@ -361,9 +361,9 @@ def test_compact_full_panel_omits_unneeded_summary_and_commission_rows():
     assert "g_ps_metrics.mini_w=PS_U(360);" in metrics
     assert "g_ps_metrics.mini_h=PS_U(92);" in metrics
     assert "g_ps_metrics.compact_w=PS_U(372);" in metrics
-    assert "g_ps_metrics.compact_h=PS_U(470);" in metrics
+    assert "g_ps_metrics.compact_h=PS_U(492);" in metrics
     assert "g_ps_metrics.full_w=PS_U(438);" in metrics
-    assert "g_ps_metrics.full_h=PS_U(529);" in metrics
+    assert "g_ps_metrics.full_h=PS_U(547);" in metrics
     assert "PS_CTRL_COMMISSION_MODE" not in layout
     assert "PS_CTRL_COMMISSION_FIELD" not in layout
     assert "PS_CTRL_ACTUAL_PERCENT" not in layout
@@ -414,13 +414,10 @@ def test_persistence_contains_configuration_and_symbol_scoped_planning_state():
         "entry", "stop", "take",
     ]:
         assert f'"{allowed}"' in persistence
-    load = persistence.split("bool PS_PersistenceLoad", 1)[1]
-    same_symbol_block = load.index("if(same_planning_symbol)")
-    assert load.index('PS_PersistenceKey(base,"direction")') < same_symbol_block
-    assert load.index('PS_PersistenceKey(base,"ordermode")') < same_symbol_block
-    assert load.index('PS_PersistenceKey(base,"entry")') > same_symbol_block
-    assert "same_symbol_plan_loaded=true;" in load
-    assert "return(same_symbol_plan_loaded);" in load
+    # Round-trip, symbol isolation and legacy migration are executed in
+    # test_native_plan_preservation. Do not require the obsolete one-plan branch.
+    assert "PS_PersistenceSavePlan(base,market,model);" in persistence
+    assert "PS_PersistenceLoadPlan(base,market,model);" in persistence
     assert "PS_STATE_NAMESPACE" in persistence
 
 
@@ -432,8 +429,8 @@ def test_lines_are_hlines_locked_and_handles_are_separate_hit_tested_objects():
     assert "PS_UIApplyLineLock" in ui
     assert '"handle."+id+".box"' in ui
     assert "PS_UIHitHandle" in ui
-    assert "PS_UISetRect(rect,x,y,36,26);" in ui
-    assert "PS_UISetRect(candidate,x,y-13,36,26);" in ui
+    assert "PS_UISetRect(rect,x,y,PS_U(36),PS_U(26));" in ui
+    assert "PS_UISetRect(candidate,x,y-PS_U(13),PS_U(36),PS_U(26));" in ui
     assert "ChartXYToTimePrice" in ALL_SOURCE
     assert "CHARTEVENT_OBJECT_DRAG" in ALL_SOURCE
 
@@ -479,8 +476,8 @@ def test_full_mode_uses_one_inset_grid_without_touching_or_crossing_borders():
         "PS_CTRL_ACTUAL_MONEY],x+PS_U(281),y+PS_U(305),PS_U(137),PS_U(28)",
         "PS_CTRL_POSITION_SIZE],x+PS_U(92),y+PS_U(341),PS_U(281),PS_U(28)",
         "PS_CTRL_POSITION_COPY],x+PS_U(379),y+PS_U(341),PS_U(39),PS_U(28)",
-        "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(18),y+PS_U(379),PS_U(402),PS_U(48)",
-        "PS_CTRL_TRADE],content_x,y+PS_U(481),content_w,PS_U(40)",
+        "PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(18),y+PS_U(379),PS_U(402),PS_U(66)",
+        "PS_CTRL_TRADE],content_x,y+PS_U(499),content_w,PS_U(40)",
     ]:
         assert geometry in ui
     assert "g_ps_metrics.full_h" in ui
@@ -491,7 +488,7 @@ def test_full_mode_uses_one_inset_grid_without_touching_or_crossing_borders():
 
 def test_full_mode_uses_compact_visual_language_without_decorative_control_icons():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
-    premium = re.search(r"void PS_UIPremiumRender.*?\n  \}\n\nvoid PS_UIRender", ui, re.S).group(0)
+    premium = re.search(r"bool PS_UIPremiumRender.*?\n  \}", ui, re.S).group(0)
     full = premium.split("g_ps_panel_canvas.Erase(PS_PremiumColor(PS_ThemeBackground()));", 1)[1]
     assert 'PS_PremiumControlButton(ui,PS_CTRL_MANUAL,"Manual"' in full
     assert 'PS_PremiumModeButton(ui,PS_CTRL_FULL,"Full",model.view_mode==PS_VIEW_FULL' in full
@@ -499,10 +496,10 @@ def test_full_mode_uses_compact_visual_language_without_decorative_control_icons
     assert 'PS_PremiumModeButton(ui,PS_CTRL_MINI,"Mini",model.view_mode==PS_VIEW_MINI' in full
     assert 'PS_PremiumRoundRect(PS_U(10),PS_U(47),PS_U(418),PS_U(48)' in full
     assert 'PS_PremiumRoundRect(PS_U(10),PS_U(102),PS_U(418),PS_U(139)' in full
-    assert 'PS_PremiumRoundRect(PS_U(10),PS_U(249),PS_U(418),PS_U(180)' in full
+    assert 'PS_PremiumRoundRect(PS_U(10),PS_U(249),PS_U(418),PS_U(198)' in full
     assert "PS_PremiumCompactField(ui,PS_CTRL_ENTRY_FIELD" in full
     assert "PS_PremiumRoundRect(10,488,436,27" not in full
-    assert "PS_CTRL_TRADE],content_x,y+PS_U(481),content_w,PS_U(40)" in ui
+    assert "PS_CTRL_TRADE],content_x,y+PS_U(499),content_w,PS_U(40)" in ui
     for token in [
         "PS_PremiumLogo(",
         "PS_PremiumSlidersIcon(",
@@ -520,7 +517,7 @@ def test_full_mode_uses_compact_visual_language_without_decorative_control_icons
 def test_full_and_compact_use_the_requested_short_labels():
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     compact = re.search(r"void PS_PremiumRenderCompact.*?\n  \}", ui, re.S).group(0)
-    premium = re.search(r"void PS_UIPremiumRender.*?\n  \}\n\nvoid PS_UIRender", ui, re.S).group(0)
+    premium = re.search(r"bool PS_UIPremiumRender.*?\n  \}", ui, re.S).group(0)
     full = premium.split("g_ps_panel_canvas.Erase(PS_PremiumColor(PS_ThemeBackground()));", 1)[1]
     for render in [compact, full]:
         for label in ['"SL"', '"TP"', '"Size"']:
@@ -556,7 +553,8 @@ def test_symbol_change_builds_one_fresh_mode_aware_plan_before_activation():
     assert "PS_RefreshMarket(false);" in chart_event.split("if(id==CHARTEVENT_CHART_CHANGE)", 1)[1]
     assert "PSModel candidate;" in fresh
     assert "candidate.order_mode==PS_ORDER_PENDING" in fresh
-    assert "PS_ModelValidateCandidate(candidate,market,error)" in fresh
+    # Executability belongs to risk/submission validation, not panel creation.
+    assert "PS_ModelPlaceOutward" in fresh
     assert "PS_CopyModel(model,candidate);" in fresh
 
 
@@ -584,7 +582,7 @@ def test_timeframe_reinitialization_restores_same_symbol_planning_state_only():
     for key in ['"plansym"', '"direction"', '"ordermode"', '"entry"', '"stop"', '"take"']:
         assert key in persistence
     assert "PS_HashString32(market.symbol)" in persistence
-    assert "same_planning_symbol" in persistence
+    assert "PS_PersistenceLoadPlan" in persistence
     assert "PS_PersistenceSave(g_persistence_base,g_market,g_model,g_exposure_ui);" in main
     assert "bool same_symbol_plan_loaded=PS_PersistenceLoad(g_persistence_base,g_market,g_model,g_exposure_ui);" in main
     assert "same_symbol_plan_loaded &&" in main
@@ -644,7 +642,7 @@ def test_field_editor_supports_precise_caret_drag_selection_and_double_click_sel
     assert "editor.has_selection=false;" in begin
     assert "PS_UIEditorCursorIndex" in mouse_press
     assert "PS_EditorSetCursorIndex(g_editor,cursor,false);" in mouse_press
-    assert "TextWidth(StringSubstr(text,0,index+1))" in hit_test
+    assert "TextWidth(StringSubstr(text,start,index-start+1))" in hit_test
     assert "(previous_width+next_width)/2" in hit_test
     assert "PS_EditorSetCursorIndex(g_editor,cursor,true);" in mouse_move
     assert "MathMax(dx,dy)<2" in mouse_move
@@ -723,9 +721,9 @@ def test_compact_geometry_is_materially_smaller_and_single_canvas_renderer_is_pr
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
     layout = re.search(r"void PS_UILayout.*?\n  \}", ui, re.S).group(0)
     compact = re.search(r"void PS_PremiumRenderCompact.*?\n  \}", ui, re.S).group(0)
-    premium = re.search(r"void PS_UIPremiumRender.*?\n  \}", ui, re.S).group(0)
+    premium = re.search(r"bool PS_UIPremiumRender.*?\n  \}", ui, re.S).group(0)
 
-    assert not re.search(r"(?:x|y)\+\d+", layout)
+    assert not re.search(r"(?<![\w])(?:x|y)\+\d+", layout)
     for control in [
         "PS_CTRL_MANUAL", "PS_CTRL_FULL", "PS_CTRL_COMPACT", "PS_CTRL_MINI", "PS_CTRL_THEME", "PS_CTRL_CLOSE",
         "PS_CTRL_DIRECTION", "PS_CTRL_ORDER_MODE", "PS_CTRL_ENTRY_FIELD", "PS_CTRL_STOP_FIELD",
@@ -739,7 +737,7 @@ def test_compact_geometry_is_materially_smaller_and_single_canvas_renderer_is_pr
     for geometry in [
         "PS_PremiumRoundRect(PS_U(8),PS_U(43),PS_U(356),PS_U(42)",
         "PS_PremiumRoundRect(PS_U(8),PS_U(91),PS_U(356),PS_U(126)",
-        "PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(163)",
+        "PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(185)",
     ]:
         assert geometry in compact
     assert "g_ps_panel_canvas.Line(9,278" not in compact
@@ -1012,7 +1010,9 @@ def test_order_mode_transition_is_candidate_based_failure_aware_and_recalculated
     assert "PSModel candidate;" in transition
     assert "PS_CopyModel(candidate,model);" in transition
     assert "candidate.stop_loss" in transition
-    assert "PS_ModelValidateCandidate(candidate,market,error)" in transition
+    # Executed mode-cycle tests prove fixed SL/TP and submission still validates.
+    assert "candidate.order_mode=PS_ORDER_PENDING;" in transition
+    assert "candidate.order_mode=PS_ORDER_INSTANT;" in transition
     assert "PS_CopyModel(model,candidate);" in transition
     assert "bool PS_ModelChangeOrderMode" in risk
     assert "if(!PS_ModelChangeOrderMode" in order_case
@@ -1121,7 +1121,7 @@ def test_release_source_uses_metaeditor_compatible_constant_forms():
     main = MAIN.read_text(encoding="utf-8")
     logging = (SRC / "PS_Logging.mqh").read_text(encoding="utf-8")
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
-    assert '#property version   "1.20"' in main
+    assert '#property version   "1.21"' in main
     assert not re.search(r"(?m)^\s*#if\s+(?!def\b|ndef\b)", logging)
     assert "const color text_color=C'154,164,181'" in ui
 

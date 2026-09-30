@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,10 +11,11 @@ UPDATER = (ROOT / "installer" / "cmd" / "setup" / "updater_windows.go").read_tex
 PROTOCOL = (ROOT / "installer" / "internal" / "update" / "protocol.go").read_text(encoding="utf-8")
 
 
-def test_ea_launches_updater_once_after_ten_seconds_and_skips_tester():
-    assert "g_update_check_launched=(bool)MQLInfoInteger(MQL_TESTER)" in EA
-    assert "now-g_update_check_start_ms>=10000" in EA
-    assert "g_update_check_launched=true" in EA
+def test_ea_schedules_background_checks_after_ten_seconds_and_skips_tester():
+    # The extracted scheduler behavior is executed in test_native_update_schedule.
+    assert "g_update_checks_enabled=!(bool)MQLInfoInteger(MQL_TESTER)" in EA
+    assert "g_next_update_check_ms=GetTickCount64()+10000" in EA
+    assert "PS_CheckForUpdates(now);" in EA
     assert "PS_PlatformLaunchUpdater(update_error)" in EA
     assert 'ShellExecuteW' in PLATFORM
     assert '"-check-update"' in PLATFORM
@@ -37,7 +39,7 @@ def test_updater_has_signed_stable_daily_update_contract():
 def test_updater_runs_verified_temporary_copy_and_preserves_activation_boundary():
     assert "temporary updater worker hash" in UPDATER
     assert '"-updater-worker"' in UPDATER
-    assert '"-terminal-data-dir="+installed.SelectedTerminalDataDir' in UPDATER
+    assert re.search(r'"-terminal-data-dir="\s*\+\s*installed\.SelectedTerminalDataDir', UPDATER)
     assert '"-quiet"' in UPDATER
     assert "reattached or MetaTrader 5 is next restarted" in UPDATER
     assert "os.Exit" not in UPDATER

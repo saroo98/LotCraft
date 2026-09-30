@@ -28,8 +28,8 @@ var embeddedEX5 []byte
 
 const (
 	productName       = "LotCraft"
-	productVersion    = "1.2.0"
-	setupTitle        = "LotCraft 1.2.0 Setup"
+	productVersion    = "1.2.1"
+	setupTitle        = "LotCraft 1.2.1 Setup"
 	ex5Name           = "LotCraft.ex5"
 	updaterName       = "LotCraft-Updater.exe"
 	uninstallName     = "LotCraft-Uninstall.exe"
@@ -46,9 +46,8 @@ const (
 	openExisting              = 3
 	fileFlagBackupSemantics   = 0x02000000
 
-	moveFileReplaceExisting  = 0x00000001
-	moveFileDelayUntilReboot = 0x00000004
-	moveFileWriteThrough     = 0x00000008
+	moveFileReplaceExisting = 0x00000001
+	moveFileWriteThrough    = 0x00000008
 
 	mbOK              = 0x00000000
 	mbYesNo           = 0x00000004
@@ -81,19 +80,21 @@ var (
 )
 
 type options struct {
-	terminalRoot  string
-	payload       string
-	uninstall     bool
-	allowReparse  bool
-	quiet         bool
-	logPath       string
-	versionOnly   bool
-	cleanupTarget string
-	cleanupDir    string
-	cleanupParent int
-	checkUpdate   bool
-	updaterWorker bool
-	productDir    string
+	terminalRoot            string
+	payload                 string
+	uninstall               bool
+	allowReparse            bool
+	quiet                   bool
+	logPath                 string
+	versionOnly             bool
+	cleanupTarget           string
+	cleanupDir              string
+	cleanupParent           int
+	cleanupHash             string
+	expectedInstallResolved string
+	checkUpdate             bool
+	updaterWorker           bool
+	productDir              string
 }
 
 type installManifest struct {
@@ -137,6 +138,7 @@ func main() {
 	opt := parseOptions()
 	if opt.cleanupTarget != "" {
 		if err := runCleanupHelper(opt); err != nil {
+			appendEmergencyUpdaterLog(fmt.Errorf("uninstaller cleanup failed; retained files require review: %w", err))
 			os.Exit(1)
 		}
 		return
@@ -152,7 +154,7 @@ func main() {
 	}
 	logPath := opt.logPath
 	if logPath == "" {
-		logPath = filepath.Join(os.TempDir(), "LotCraft-1.2.0-install.log")
+		logPath = filepath.Join(os.TempDir(), "LotCraft-1.2.1-install.log")
 	}
 	log, err := newLogger(logPath, opt.quiet)
 	if err != nil {
@@ -194,6 +196,8 @@ func parseOptions() options {
 	flag.StringVar(&opt.cleanupTarget, "cleanup-target", "", "internal post-uninstall cleanup target")
 	flag.StringVar(&opt.cleanupDir, "cleanup-dir", "", "internal post-uninstall product directory")
 	flag.IntVar(&opt.cleanupParent, "cleanup-parent-pid", 0, "internal post-uninstall parent process")
+	flag.StringVar(&opt.cleanupHash, "cleanup-sha256", "", "internal verified cleanup target hash")
+	flag.StringVar(&opt.expectedInstallResolved, "expected-install-resolved", "", "internal verified update destination")
 	flag.BoolVar(&opt.checkUpdate, "check-update", false, "check the latest signed stable release")
 	flag.BoolVar(&opt.updaterWorker, "updater-worker", false, "internal detached updater worker")
 	flag.StringVar(&opt.productDir, "product-dir", "", "internal verified LotCraft installation directory")
@@ -265,6 +269,14 @@ func runInstall(opt options, log *logger) error {
 	if err != nil || !inside {
 		return fmt.Errorf("resolved destination escapes the selected terminal's MQL5\\Experts ownership root: experts=%s destination=%s", expertsResolved, installResolved)
 	}
+	if opt.expectedInstallResolved != "" && !sameWindowsPath(opt.expectedInstallResolved, installResolved) {
+		return errors.New("update destination no longer matches the approved resolved installation")
+	}
+	mutation, err := acquireInstallationMutation(installResolved)
+	if err != nil {
+		return err
+	}
+	defer mutation.Close()
 
 	reparseObserved := uniqueSorted(append(
 		append(reparseComponents(terminalRoot), reparseComponents(expertsPath)...),
@@ -401,27 +413,31 @@ func runInstall(opt options, log *logger) error {
 		{temp: manifestTemp, final: filepath.Join(installPath, manifestName)},
 	}
 	if err := commitPrepared(prepared); err != nil {
-		return fmt.Errorf("commit installation atomically: %w", err)
+		return fmt.Errorf("commit installation transaction: %w", err)
 	}
 
 	installedPath := filepath.Join(installPath, ex5Name)
 	installedResolved, err := resolveExistingPath(installedPath)
 	if err != nil {
-		rollbackPrepared(prepared)
-		return fmt.Errorf("resolve installed EX5: %w", err)
+		return rollbackInstallation(prepared, fmt.Errorf("resolve installed EX5: %w", err))
 	}
 	inside, err = policy.Within(expertsResolved, installedResolved)
 	if err != nil || !inside {
-		rollbackPrepared(prepared)
-		return fmt.Errorf("installed EX5 escaped resolved MQL5\\Experts root: %s", installedResolved)
+		return rollbackInstallation(prepared, fmt.Errorf("installed EX5 escaped resolved MQL5\\Experts root: %s", installedResolved))
 	}
 	installedHash, err := hashFile(installedPath)
 	if err != nil || installedHash != canonicalHash {
-		rollbackPrepared(prepared)
 		if err != nil {
-			return fmt.Errorf("hash installed EX5: %w", err)
+			return rollbackInstallation(prepared, fmt.Errorf("hash installed EX5: %w", err))
 		}
-		return errors.New("installed EX5 SHA-256 differs from canonical EX5")
+		return rollbackInstallation(prepared, errors.New("installed EX5 SHA-256 differs from canonical EX5"))
+	}
+	verified, _, err := readVerifiedUpdaterInstall(installPath)
+	if err != nil {
+		return rollbackInstallation(prepared, fmt.Errorf("verify committed installation: %w", err))
+	}
+	if verified.Version != productVersion {
+		return rollbackInstallation(prepared, errors.New("committed installation version differs from installer"))
 	}
 	finalizePrepared(prepared)
 
@@ -429,7 +445,7 @@ func runInstall(opt options, log *logger) error {
 	log.printf("hash canonical_ex5=%s staged_ex5=%s installed_ex5=%s installer=%s updater=%s", canonicalHash, stagedHash, installedHash, installerHash, updaterHash)
 	if !opt.quiet {
 		showMessage(setupTitle,
-			"LotCraft 1.2.0 was installed successfully.\n\nFinal destination:\n"+installedResolved+"\n\nSHA-256:\n"+installedHash+"\n\nRestart MetaTrader 5 or refresh the Navigator before attaching the EA.",
+			"LotCraft 1.2.1 was installed successfully.\n\nFinal destination:\n"+installedResolved+"\n\nSHA-256:\n"+installedHash+"\n\nRestart MetaTrader 5 or refresh the Navigator before attaching the EA.",
 			mbOK|mbIconInformation|mbSetForeground)
 	}
 	return nil
@@ -473,6 +489,15 @@ func runUninstall(opt options, log *logger) error {
 		return err
 	}
 	productDir = filepath.Clean(productDir)
+	lockPath, err := resolveExistingPath(productDir)
+	if err != nil {
+		return fmt.Errorf("resolve uninstall destination: %w", err)
+	}
+	mutation, err := acquireInstallationMutation(lockPath)
+	if err != nil {
+		return err
+	}
+	defer mutation.Close()
 
 	manifestPath := filepath.Join(productDir, manifestName)
 	raw, err := os.ReadFile(manifestPath)
@@ -541,7 +566,7 @@ func runUninstall(opt options, log *logger) error {
 	}
 
 	if !opt.quiet {
-		message := "Remove LotCraft 1.2.0 from:\n" + currentProductResolved + "\n\nOnly the four installer-owned files will be removed. Unrelated files will be preserved."
+		message := "Remove LotCraft 1.2.1 from:\n" + currentProductResolved + "\n\nOnly the four installer-owned files will be removed. Unrelated files will be preserved."
 		if showMessage(setupTitle, message, mbYesNo|mbIconQuestion|mbSetForeground) != idYes {
 			return errors.New("uninstall cancelled")
 		}
@@ -566,11 +591,9 @@ func runUninstall(opt options, log *logger) error {
 			return fmt.Errorf("installed uninstaller SHA-256 mismatch; refusing self-deletion: expected=%s actual=%s", manifest.InstallerSHA256, selfHash)
 		}
 		if err := scheduleSelfDelete(uninstallerPath, productDir); err != nil {
-			// A reboot-time delete is the safe fallback if the transient helper cannot start.
-			if fallbackErr := scheduleDeleteAtReboot(uninstallerPath); fallbackErr != nil {
-				return fmt.Errorf("schedule uninstaller removal: helper=%v fallback=%v", err, fallbackErr)
-			}
-			log.printf("uninstaller scheduled for deletion at reboot")
+			// Keep the manifest for a retry. A reboot-time filename-only delete
+			// could remove a newer installation created before that reboot.
+			return fmt.Errorf("schedule verified uninstaller removal; ownership manifest retained for retry: %w", err)
 		} else {
 			log.printf("uninstaller scheduled for immediate post-exit deletion")
 		}
@@ -583,9 +606,14 @@ func runUninstall(opt options, log *logger) error {
 		return fmt.Errorf("remove install manifest: %w", err)
 	}
 
-	log.printf("uninstall complete product_dir=%s", currentProductResolved)
+	cleanupPending := sameWindowsPath(uninstallerPath, self)
+	log.printf("uninstall payload removal complete product_dir=%s self_cleanup_pending=%t", currentProductResolved, cleanupPending)
 	if !opt.quiet {
-		showMessage(setupTitle, "LotCraft 1.2.0 owned files were removed.\n\nDirectory checked:\n"+currentProductResolved+"\n\nAny unrelated files in that directory were preserved.", mbOK|mbIconInformation|mbSetForeground)
+		status := "LotCraft 1.2.1 owned files were removed."
+		if cleanupPending {
+			status = "The LotCraft EA and updater were removed.\n\nClose this dialog to let the uninstaller remove its own file. Cleanup failures are recorded in the local LotCraft updater logs."
+		}
+		showMessage(setupTitle, status+"\n\nDirectory checked:\n"+currentProductResolved+"\n\nAny unrelated files in that directory were preserved.", mbOK|mbIconInformation|mbSetForeground)
 	}
 	return nil
 }
@@ -759,6 +787,17 @@ func validateExistingInstallOwnership(installPath, installResolved, expertsResol
 		expectedOwned[updaterName] = true
 	} else if schema != 1 {
 		return fmt.Errorf("existing manifest schema %d is unsupported", manifest.SchemaVersion)
+	} else {
+		// The legacy inventory does not own the newly introduced updater name.
+		// Never treat an unrelated file at that destination as upgradeable.
+		if manifest.Version != "1.0.0" {
+			return errors.New("three-file legacy migration is supported only for LotCraft 1.0.0")
+		}
+		if _, err := os.Lstat(filepath.Join(installPath, updaterName)); err == nil {
+			return errors.New("legacy installation does not own the existing updater filename; refusing to overwrite it")
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("inspect legacy updater collision: %w", err)
+		}
 	}
 	if len(manifest.OwnedFiles) != len(expectedOwned) {
 		return errors.New("existing manifest owned-file inventory is not exact")
@@ -964,31 +1003,33 @@ type preparedFile struct {
 	committed bool
 }
 
-func commitPrepared(files []*preparedFile) error {
+func commitPrepared(files []*preparedFile) (err error) {
+	defer func() {
+		if err != nil {
+			err = rollbackInstallation(files, err)
+		}
+	}()
 	for _, file := range files {
 		if _, err := os.Lstat(file.final); err == nil {
 			if err := validateRegularNonReparseFile(file.final); err != nil {
-				rollbackPrepared(files)
 				return fmt.Errorf("existing owned path %s is unsafe: %w", file.final, err)
 			}
 			backup, err := reserveSiblingName(file.final, ".LotCraft-backup-*.tmp")
 			if err != nil {
-				rollbackPrepared(files)
 				return err
 			}
-			_ = os.Remove(backup)
+			if err := os.Remove(backup); err != nil {
+				return fmt.Errorf("release reserved backup name: %w", err)
+			}
 			if err := moveFile(file.final, backup, false); err != nil {
-				rollbackPrepared(files)
 				return err
 			}
 			file.backup = backup
 			file.hadOld = true
 		} else if !errors.Is(err, os.ErrNotExist) {
-			rollbackPrepared(files)
 			return err
 		}
 		if err := moveFile(file.temp, file.final, true); err != nil {
-			rollbackPrepared(files)
 			return err
 		}
 		file.committed = true
@@ -996,20 +1037,39 @@ func commitPrepared(files []*preparedFile) error {
 	return nil
 }
 
-func rollbackPrepared(files []*preparedFile) {
+func rollbackInstallation(files []*preparedFile, cause error) error {
+	if err := rollbackPrepared(files); err != nil {
+		return errors.Join(cause, fmt.Errorf("rollback incomplete; preserve the recovery backups and inspect the installation before retrying: %w", err))
+	}
+	return cause
+}
+
+func rollbackPrepared(files []*preparedFile) error {
+	var failures []error
 	for i := len(files) - 1; i >= 0; i-- {
 		file := files[i]
 		if file.committed {
-			_ = os.Remove(file.final)
+			if err := os.Remove(file.final); err != nil && !errors.Is(err, os.ErrNotExist) {
+				failures = append(failures, fmt.Errorf("cannot remove new file %s; recovery backup retained at %s: %w", file.final, file.backup, err))
+				continue
+			}
 			file.committed = false
 		}
 		if file.hadOld && file.backup != "" {
-			_ = moveFile(file.backup, file.final, true)
+			if err := moveFile(file.backup, file.final, false); err != nil {
+				failures = append(failures, fmt.Errorf("cannot restore %s; recovery backup retained at %s: %w", file.final, file.backup, err))
+			} else {
+				file.hadOld = false
+				file.backup = ""
+			}
 		}
 		if file.temp != "" {
-			_ = os.Remove(file.temp)
+			if err := os.Remove(file.temp); err != nil && !errors.Is(err, os.ErrNotExist) {
+				failures = append(failures, fmt.Errorf("cannot remove staged file %s: %w", file.temp, err))
+			}
 		}
 	}
+	return errors.Join(failures...)
 }
 
 func finalizePrepared(files []*preparedFile) {
@@ -1107,13 +1167,23 @@ func scheduleSelfDelete(self, productDir string) error {
 	if !sameWindowsPath(filepath.Dir(self), productDir) {
 		return errors.New("self-delete target is not inside the product directory")
 	}
-	helper, helperHash, err := copyToTempAndHash(self, os.TempDir(), "LotCraft-cleanup-*.exe")
+	productResolved, err := resolveExistingPath(productDir)
 	if err != nil {
+		return fmt.Errorf("resolve cleanup product directory: %w", err)
+	}
+	helperDir, err := os.MkdirTemp("", "LotCraft-Cleanup-")
+	if err != nil {
+		return err
+	}
+	helper, helperHash, err := copyToTempAndHash(self, helperDir, "LotCraft-cleanup-*.exe")
+	if err != nil {
+		_ = os.Remove(helperDir)
 		return fmt.Errorf("create cleanup helper: %w", err)
 	}
 	selfHash, err := hashFile(self)
 	if err != nil || helperHash != selfHash {
 		_ = os.Remove(helper)
+		_ = os.Remove(helperDir)
 		return errors.New("cleanup helper SHA-256 differs from the installed uninstaller")
 	}
 	process, err := os.StartProcess(
@@ -1123,30 +1193,29 @@ func scheduleSelfDelete(self, productDir string) error {
 			"-cleanup-target", self,
 			"-cleanup-dir", productDir,
 			"-cleanup-parent-pid", fmt.Sprintf("%d", os.Getpid()),
+			"-cleanup-sha256", selfHash,
+			"-expected-install-resolved", productResolved,
 			"-quiet",
 		},
-		&os.ProcAttr{Files: []*os.File{nil, nil, nil}},
+		&os.ProcAttr{Files: []*os.File{nil, nil, nil}, Sys: &syscall.SysProcAttr{HideWindow: true}},
 	)
 	if err != nil {
 		_ = os.Remove(helper)
+		_ = os.Remove(helperDir)
 		return fmt.Errorf("start cleanup helper: %w", err)
 	}
 	return process.Release()
 }
 
-func scheduleDeleteAtReboot(path string) error {
-	src, err := syscall.UTF16PtrFromString(longPath(path))
-	if err != nil {
-		return err
-	}
-	result, _, callErr := procMoveFileExW.Call(uintptr(unsafe.Pointer(src)), 0, moveFileDelayUntilReboot)
-	if result == 0 {
-		return windowsCallError("MoveFileExW(MOVEFILE_DELAY_UNTIL_REBOOT)", callErr)
-	}
-	return nil
-}
-
 func runCleanupHelper(opt options) error {
+	self := executablePath()
+	if _, _, _, err := validateDetachedCleanupTarget(self); err == nil {
+		defer func() {
+			if err := scheduleDetachedExecutableCleanup(self, os.Getpid()); err != nil {
+				appendEmergencyUpdaterLog(fmt.Errorf("temporary uninstaller cleanup could not start; copy retained: %w", err))
+			}
+		}()
+	}
 	target, err := filepath.Abs(opt.cleanupTarget)
 	if err != nil {
 		return err
@@ -1159,12 +1228,40 @@ func runCleanupHelper(opt options) error {
 	productDir = filepath.Clean(productDir)
 	if !strings.EqualFold(filepath.Base(target), uninstallName) ||
 		!sameWindowsPath(filepath.Dir(target), productDir) ||
-		opt.cleanupParent <= 0 {
+		opt.cleanupParent <= 0 || len(opt.cleanupHash) != 64 || opt.expectedInstallResolved == "" {
 		return errors.New("invalid internal cleanup request")
 	}
 	if parent, findErr := os.FindProcess(opt.cleanupParent); findErr == nil {
 		_, _ = parent.Wait()
 		_ = parent.Release()
+	}
+	resolved, err := resolveExistingPath(productDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil || !sameWindowsPath(resolved, opt.expectedInstallResolved) {
+		return errors.New("uninstaller cleanup directory changed; preserving the target")
+	}
+	mutation, err := acquireInstallationMutation(resolved)
+	if err != nil {
+		return err
+	}
+	defer mutation.Close()
+	if _, err := os.Lstat(filepath.Join(productDir, manifestName)); err == nil {
+		// The parent removed its ownership record before exiting. A manifest
+		// now present belongs to a replacement installation, even at the same
+		// version and hash. Never remove that installation's uninstaller.
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if _, err := os.Lstat(target); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := verifyRequiredOwnedFileHash(target, opt.cleanupHash); err != nil {
+		return fmt.Errorf("uninstaller cleanup identity changed; preserving the target: %w", err)
 	}
 
 	var removeErr error
@@ -1177,14 +1274,12 @@ func runCleanupHelper(opt options) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	if removeErr != nil {
-		if err := scheduleDeleteAtReboot(target); err != nil {
-			return fmt.Errorf("remove installed uninstaller: immediate=%v reboot=%v", removeErr, err)
-		}
+		return fmt.Errorf("remove installed uninstaller; file retained: %w", removeErr)
 	}
 	// This is intentionally non-recursive. It succeeds only when no unrelated
 	// file remains in the dedicated product directory.
 	_ = os.Remove(productDir)
-	return scheduleDeleteAtReboot(executablePath())
+	return nil
 }
 
 func browseForFolder(title string) (string, error) {

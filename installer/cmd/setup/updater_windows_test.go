@@ -93,7 +93,7 @@ func TestLegacyThreeFileManifestCanUpgradeToUpdaterSchema(t *testing.T) {
 	}
 	legacy := installManifest{
 		Product:            productName,
-		Version:            productVersion,
+		Version:            "1.0.0",
 		ExpertsPath:        experts,
 		ExpertsResolved:    expertsResolved,
 		InstallPath:        installPath,
@@ -126,7 +126,7 @@ func TestLegacyManifestTamperingIsRejected(t *testing.T) {
 	installResolved, _ := resolveExistingPath(installPath)
 	legacy := installManifest{
 		Product:            productName,
-		Version:            productVersion,
+		Version:            "1.0.0",
 		ExpertsPath:        experts,
 		ExpertsResolved:    expertsResolved,
 		InstallPath:        installPath,

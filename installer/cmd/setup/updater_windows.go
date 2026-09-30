@@ -50,7 +50,7 @@ func runUpdaterMode(opt options) error {
 }
 
 // launchUpdaterWorker runs only from the installed updater. It verifies that
-// copy against the signed installation record, then starts the network-facing
+// copy against the hash-verified installation record, then starts the network-facing
 // work from an equally verified temporary copy. The installed updater is never
 // running while a newer installer replaces it.
 func launchUpdaterWorker() error {
@@ -94,7 +94,7 @@ func launchUpdaterWorker() error {
 			"-product-dir=" + productDir,
 			"-quiet",
 		},
-		&os.ProcAttr{Files: []*os.File{nil, nil, nil}},
+		&os.ProcAttr{Files: []*os.File{nil, nil, nil}, Sys: &syscall.SysProcAttr{HideWindow: true}},
 	)
 	if err != nil {
 		_ = os.Remove(worker)
@@ -105,6 +105,13 @@ func launchUpdaterWorker() error {
 }
 
 func runUpdaterWorker(opt options) error {
+	workerPath := executablePath()
+	if _, _, _, err := validateDetachedCleanupTarget(workerPath); err != nil {
+		return fmt.Errorf("updater worker is not a safe detached temporary copy: %w", err)
+	}
+	// Register cleanup before parsing the installation. A changed/missing
+	// manifest must not leak the already-created worker executable.
+	defer scheduleUpdaterWorkerDeletion()
 	if opt.productDir == "" {
 		return errors.New("temporary updater worker did not receive a product directory")
 	}
@@ -118,7 +125,6 @@ func runUpdaterWorker(opt options) error {
 	if err != nil {
 		return err
 	}
-	workerPath := executablePath()
 	workerName := strings.ToLower(filepath.Base(workerPath))
 	if !strings.HasPrefix(workerName, "lotcraft-updater-worker-") ||
 		filepath.Ext(workerName) != ".exe" ||
@@ -132,7 +138,6 @@ func runUpdaterWorker(opt options) error {
 	if !strings.EqualFold(workerHash, manifest.UpdaterSHA256) {
 		return errors.New("temporary updater worker does not match the verified installed updater")
 	}
-	defer scheduleUpdaterWorkerDeletion()
 
 	installationID := updaterInstallationID(installResolved)
 	mutex, acquired, err := acquireUpdaterMutex(installationID)
@@ -248,7 +253,8 @@ func runUpdaterWorker(opt options) error {
 		log.printf("update failed after approval version=%s: %v", candidate.Manifest.Version, err)
 		showMessage(
 			"LotCraft update failed",
-			"The update was not installed. Your existing LotCraft installation was preserved.\n\n"+
+			"The update did not complete. MetaTrader 5 was not restarted.\n\n"+
+				"Check the installation and any recovery instructions in the log before retrying.\n\n"+
 				err.Error()+"\n\nDetails were recorded in:\n"+logPath,
 			mbOK|mbIconError|mbSetForeground,
 		)
@@ -309,12 +315,18 @@ func downloadAndInstallUpdate(
 	}
 
 	installLog := filepath.Join(stateDir, "installer.log")
-	command := exec.Command(
-		installerPath,
-		"-terminal-data-dir="+installed.SelectedTerminalDataDir,
-		"-quiet",
-		"-log="+installLog,
-	)
+	// Approval/download can take time. Recheck the complete path and link
+	// identity immediately before launching the destination-owning installer.
+	current, _, err := readVerifiedUpdaterInstall(installed.InstallPath)
+	if err != nil {
+		return fmt.Errorf("reverify installation before update: %w", err)
+	}
+	if current.Version != installed.Version || current.InstallerSHA256 != installed.InstallerSHA256 {
+		return errors.New("installation changed during the update check; retry after checking the installed version")
+	}
+	installed = current
+	command := exec.Command(installerPath, updateInstallerArguments(installed, installLog)...)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	command.Stdout = nil
 	command.Stderr = nil
 	if err := command.Run(); err != nil {
@@ -333,6 +345,19 @@ func downloadAndInstallUpdate(
 	}
 	log.printf("installer completed version=%s sha256=%s", candidate.Manifest.Version, writtenHash)
 	return nil
+}
+
+func updateInstallerArguments(installed installManifest, installLog string) []string {
+	arguments := []string{
+		"-terminal-data-dir=" + installed.SelectedTerminalDataDir,
+		"-quiet",
+		"-log=" + installLog,
+		"-expected-install-resolved=" + installed.InstallResolved,
+	}
+	if len(installed.ReparseComponentsObserved) > 0 {
+		arguments = append(arguments, "-allow-reparse")
+	}
+	return arguments
 }
 
 func readVerifiedUpdaterInstall(productDir string) (installManifest, string, error) {
@@ -358,6 +383,12 @@ func readVerifiedUpdaterInstall(productDir string) (installManifest, string, err
 	}
 	if _, err := lotupdate.ParseVersion(manifest.Version); err != nil {
 		return installManifest{}, "", fmt.Errorf("installed manifest version is invalid: %w", err)
+	}
+	if !filepath.IsAbs(manifest.SelectedTerminalDataDir) ||
+		!sameWindowsPath(filepath.Join(manifest.SelectedTerminalDataDir, "MQL5", "Experts"), manifest.ExpertsPath) ||
+		!sameWindowsPath(filepath.Join(manifest.ExpertsPath, productName), productDir) ||
+		!sameWindowsPath(manifest.InstallPath, productDir) {
+		return installManifest{}, "", errors.New("recorded terminal, Experts, and product paths do not describe this installation")
 	}
 	if manifest.UpdaterSHA256 == "" || manifest.InstallerSHA256 == "" || manifest.InstalledEX5SHA256 == "" {
 		return installManifest{}, "", errors.New("installed manifest is missing a required owned-file hash")
@@ -400,6 +431,19 @@ func readVerifiedUpdaterInstall(productDir string) (installManifest, string, err
 	selectedResolved, err := resolveExistingPath(manifest.SelectedTerminalDataDir)
 	if err != nil || !sameWindowsPath(selectedResolved, manifest.SelectedTerminalResolved) {
 		return installManifest{}, "", errors.New("recorded terminal data directory no longer matches its verified destination")
+	}
+	observed := uniqueSorted(append(
+		append(reparseComponents(manifest.SelectedTerminalDataDir), reparseComponents(manifest.ExpertsPath)...),
+		reparseComponents(productDir)...,
+	))
+	recorded := uniqueSorted(manifest.ReparseComponentsObserved)
+	if len(observed) != len(recorded) {
+		return installManifest{}, "", errors.New("installation reparse topology changed since approval; reinstall after reviewing the resolved paths")
+	}
+	for index := range observed {
+		if !sameWindowsPath(observed[index], recorded[index]) {
+			return installManifest{}, "", errors.New("installation reparse topology changed since approval; reinstall after reviewing the resolved paths")
+		}
 	}
 	for _, owned := range []struct {
 		name string
@@ -520,7 +564,21 @@ func rotateUpdaterLog(path string) error {
 }
 
 func acquireUpdaterMutex(installationID string) (*namedMutex, bool, error) {
-	name := "Local\\LotCraft-Updater-" + installationID
+	return acquireNamedMutex("Local\\LotCraft-Updater-" + installationID)
+}
+
+func acquireInstallationMutation(installResolved string) (*namedMutex, error) {
+	mutex, acquired, err := acquireNamedMutex("Global\\LotCraft-Install-" + updaterInstallationID(installResolved))
+	if err != nil {
+		return nil, fmt.Errorf("lock installation: %w", err)
+	}
+	if !acquired {
+		return nil, errors.New("another LotCraft installation or removal is in progress for this destination")
+	}
+	return mutex, nil
+}
+
+func acquireNamedMutex(name string) (*namedMutex, bool, error) {
 	namePtr, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
 		return nil, false, err
@@ -544,8 +602,9 @@ func (mutex *namedMutex) Close() {
 }
 
 func scheduleUpdaterWorkerDeletion() {
-	self := executablePath()
-	_ = scheduleDeleteAtReboot(self)
+	if err := scheduleDetachedExecutableCleanup(executablePath(), os.Getpid()); err != nil {
+		appendEmergencyUpdaterLog(fmt.Errorf("temporary updater cleanup could not start; temporary copy retained: %w", err))
+	}
 }
 
 func appendEmergencyUpdaterLog(updateErr error) {
@@ -557,11 +616,23 @@ func appendEmergencyUpdaterLog(updateErr error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return
 	}
+	mutex, acquired, err := acquireNamedMutex("Local\\LotCraft-Updater-Log-" + updaterInstallationID(directory))
+	if err != nil || !acquired {
+		return
+	}
+	defer mutex.Close()
 	path := filepath.Join(directory, "bootstrap.log")
+	if err := rotateUpdaterLog(path); err != nil {
+		return
+	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return
 	}
 	defer file.Close()
-	_, _ = fmt.Fprintf(file, "%s LotCraft updater failure: %v\r\n", time.Now().UTC().Format(time.RFC3339Nano), updateErr)
+	message := updateErr.Error()
+	if len(message) > 8192 {
+		message = message[:8192] + " [truncated]"
+	}
+	_, _ = fmt.Fprintf(file, "%s LotCraft updater failure: %s\r\n", time.Now().UTC().Format(time.RFC3339Nano), message)
 }

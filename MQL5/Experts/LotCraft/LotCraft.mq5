@@ -1,8 +1,8 @@
 #property strict
 #property copyright "LotCraft"
 #property link      ""
-#property version   "1.20"
-#property description "LotCraft 1.2.0"
+#property version   "1.21"
+#property description "LotCraft 1.2.1"
 #property description "Discretionary position sizing and explicit MT5 order entry assistant."
 
 #include "PS_Platform.mqh"
@@ -25,6 +25,8 @@ bool   g_shift_down=false;
 bool   g_ctrl_down=false;
 ulong  g_last_market_refresh_ms=0;
 ulong  g_last_exposure_refresh_ms=0;
+ulong  g_exposure_retry_after_ms=0;
+ulong  g_panel_retry_after_ms=0;
 ulong  g_last_line_lock_ms=0;
 ulong  g_last_submit_ms=0;
 ulong  g_status_until_ms=0;
@@ -40,12 +42,12 @@ bool   g_symbol_transition_pending=false;
 bool   g_pointer_motion_pending=false;
 int    g_pointer_motion_x=0;
 int    g_pointer_motion_y=0;
-bool   g_update_check_launched=false;
+bool   g_update_checks_enabled=false;
 bool   g_exposure_dirty=true;
 bool   g_panel_dirty=true;
 bool   g_exposure_details_dirty=true;
 bool   g_exposure_labels_dirty=true;
-ulong  g_update_check_start_ms=0;
+ulong  g_next_update_check_ms=0;
 PSFieldId g_last_editor_click_field=PS_FIELD_NONE;
 PSControlId g_copy_feedback_control=PS_CTRL_NONE;
 PSExposureHit g_exposure_pressed_hit=PS_EXPOSURE_HIT_NONE;
@@ -61,21 +63,36 @@ void PS_RefreshExposure(const bool force=false)
   {
    if(!g_initialized || g_symbol_transition_pending) return;
    ulong now=GetTickCount64();
+   if(!force && now<g_exposure_retry_after_ms) return;
    if(!force && !g_exposure_dirty && now-g_last_exposure_refresh_ms<1000) return;
 
    PSExposureSnapshot next;
    PS_ExposureReset(next);
    string error="";
-   if(!PS_ExposureCalculate(next,_Symbol,AccountInfoDouble(ACCOUNT_EQUITY),error))
+   bool calculated=PS_ExposureCalculate(next,_Symbol,AccountInfoDouble(ACCOUNT_EQUITY),error);
+   bool changed=false;
+   if(calculated)
      {
+      changed=PS_ExposureMeaningfullyChanged(g_exposure,next,g_market.currency_digits);
+      calculated=PS_CopyExposureSnapshot(g_exposure,next);
+      if(!calculated) error="Could not allocate the exposure display snapshot.";
+     }
+   if(!calculated)
+     {
+      // Old totals must not look current after an incomplete enumeration.
+      PS_ExposureReset(g_exposure);
       g_last_exposure_refresh_ms=now;
+      g_exposure_retry_after_ms=now+1000;
       g_exposure_dirty=true;
+      g_ui.dirty=true;
+      g_exposure_details_dirty=true;
+      g_exposure_labels_dirty=true;
+      g_ui.line_dirty=true;
       PS_LogWarningRateLimited("exposure.refresh",error,5000);
       return;
      }
 
-   bool changed=PS_ExposureMeaningfullyChanged(g_exposure,next,g_market.currency_digits);
-   PS_CopyExposureSnapshot(g_exposure,next);
+   g_exposure_retry_after_ms=0;
    g_last_exposure_refresh_ms=now;
    g_exposure_dirty=false;
    if(changed)
@@ -110,6 +127,17 @@ void PS_SaveState()
 
 bool PS_BuildFreshPlan(string &error)
   {
+   PSModel restored;
+   PS_CopyModel(restored,g_model);
+   if(PS_PersistenceLoadPlan(g_persistence_base,g_market,restored) &&
+     PS_ModelStoredPlanStructurallyValid(restored,g_market))
+     {
+      restored.revision=g_model.revision+1;
+      PS_ModelSyncInstantEntry(restored,g_market,false);
+      PS_CopyModel(g_model,restored);
+      error="";
+      return(true);
+     }
    double visible_min=ChartGetDouble(ChartID(),CHART_PRICE_MIN,0);
    double visible_max=ChartGetDouble(ChartID(),CHART_PRICE_MAX,0);
    int chart_height=(int)ChartGetInteger(ChartID(),CHART_HEIGHT_IN_PIXELS,0);
@@ -128,7 +156,23 @@ void PS_AbortInteractionForContextChange()
    g_pointer.stepper_active=false;
    g_pointer.stepper_pointer_inside=false;
    g_pointer_motion_pending=false;
+   g_keyboard_focus=PS_CTRL_NONE;
+   g_pressed_control=PS_CTRL_NONE;
+   g_hovered_control=PS_CTRL_NONE;
+   g_shift_down=false;
+   g_ctrl_down=false;
    PS_UIGuardExit(g_ui);
+  }
+
+void PS_AbortInteractionForRenderFailure()
+  {
+   // A failed paint must also cancel an interaction that started while the
+   // panel was visible. Stop further plan changes; do not apply a release.
+   PS_AbortInteractionForContextChange();
+   g_exposure_pressed_hit=PS_EXPOSURE_HIT_NONE;
+   g_exposure_pressed_row=-1;
+   g_panel_dirty=true;
+   g_panel_retry_after_ms=GetTickCount64()+1000;
   }
 
 void PS_Recalculate(const bool clear_status=false)
@@ -163,7 +207,7 @@ void PS_RefreshMarket(const bool clear_status=false)
          g_active_symbol=refreshed.symbol;
          g_exposure_dirty=true;
          transition_completed=true;
-         PS_SetStatus("Entry and planning levels were fitted to "+refreshed.symbol+".",false,3000);
+         PS_SetStatus("Planning levels ready for "+refreshed.symbol+".",false,3000);
         }
       else
         {
@@ -179,6 +223,16 @@ void PS_RefreshMarket(const bool clear_status=false)
    else
      {
       PS_CopyMarketSnapshot(g_market,refreshed);
+      if(g_symbol_transition_pending && refreshed.symbol==g_active_symbol &&
+         refreshed.symbol!=g_transition_target_symbol)
+        {
+         // A failed candidate never replaced the original plan. Returning to
+         // its symbol cancels the wait and restores normal rendering.
+         g_symbol_transition_pending=false;
+         g_transition_target_symbol="";
+         g_exposure_dirty=true;
+         transition_completed=true;
+        }
       if(g_symbol_transition_pending && refreshed.symbol==g_transition_target_symbol)
         {
          string transition_error="";
@@ -208,6 +262,11 @@ void PS_RefreshMarket(const bool clear_status=false)
 void PS_RenderIfDirty()
   {
    if(!g_initialized || !g_ui.created || g_symbol_transition_pending) return;
+   if(!g_ps_panel_render_ready)
+     {
+      PS_AbortInteractionForContextChange();
+      g_panel_dirty=true;
+     }
    if(g_pointer.capture==PS_CAPTURE_PANEL) return;
    bool drag_capture=(g_pointer.capture==PS_CAPTURE_HANDLE_ENTRY ||
                       g_pointer.capture==PS_CAPTURE_HANDLE_STOP ||
@@ -218,6 +277,8 @@ void PS_RenderIfDirty()
        // Keep pointer motion lightweight. Dynamic panel values remain marked
       // dirty and are rendered once when capture ends.
       if(g_ui.line_dirty) PS_UIRenderLinesOnly(g_ui,g_model,g_market);
+      if(g_ps_exposure_labels_layout_dirty)
+         PS_UIRenderExposureLabels(g_ui,g_model,g_exposure,g_market);
       return;
      }
    if(g_ui.dirty)
@@ -228,25 +289,33 @@ void PS_RenderIfDirty()
    bool redraw=false;
    if(g_panel_dirty)
      {
-      PS_UIRenderPanel(g_ui,g_model,g_calc,g_market,g_exposure,g_editor,g_copy_feedback_control);
+      if(GetTickCount64()<g_panel_retry_after_ms) return;
+      if(!PS_UIRenderPanel(g_ui,g_model,g_calc,g_market,g_exposure,g_editor,g_copy_feedback_control))
+        {
+         PS_AbortInteractionForRenderFailure();
+         return;
+        }
+      g_panel_retry_after_ms=0;
       g_panel_dirty=false;
       redraw=true;
      }
-   if(g_exposure_details_dirty)
+   // A direct panel render can also attempt the sidecar. Preserve that failed
+   // work, but do not redraw the chart on every timer tick during its backoff.
+   if(g_ps_exposure_retry_after_ms>0) g_exposure_details_dirty=true;
+   if(g_exposure_details_dirty && GetTickCount64()>=g_ps_exposure_retry_after_ms)
      {
-      PS_UIRenderExposureDetails(g_ui,g_model,g_exposure,g_market);
-      g_exposure_details_dirty=false;
-      redraw=true;
-     }
-   if(g_exposure_labels_dirty)
-     {
-      PS_UIRenderExposureLabels(g_ui,g_model,g_exposure,g_market);
-      g_exposure_labels_dirty=false;
+      g_exposure_details_dirty=!PS_UIRenderExposureDetails(g_ui,g_model,g_exposure,g_market);
       redraw=true;
      }
    if(g_ui.line_dirty)
      {
       PS_UIRenderLinesOnly(g_ui,g_model,g_market);
+      redraw=true;
+     }
+   if(g_exposure_labels_dirty || g_ps_exposure_labels_layout_dirty)
+     {
+      PS_UIRenderExposureLabels(g_ui,g_model,g_exposure,g_market);
+      g_exposure_labels_dirty=false;
       redraw=true;
      }
    if(redraw) ChartRedraw(ChartID());
@@ -367,7 +436,7 @@ void PS_DoCopy(const PSControlId control)
       copied=PS_CopyText(PS_PriceText(PS_IsPositiveFinite(g_model.take_profit) ? PS_NormalizePrice(g_model.take_profit,g_market) : 0.0,g_market),"Take-profit");
    else if(control==PS_CTRL_POSITION_COPY)
      {
-      if(!g_calc.valid)
+      if(!g_calc.sizing_available)
         {
          PS_SetStatus("Position size is unavailable until the configuration is valid.",true);
          return;
@@ -386,6 +455,11 @@ bool PS_BuildFreshTradeSnapshot(PSTradeSnapshot &snapshot,string &error)
   {
    error="";
    PS_RefreshMarket(false);
+   if(g_symbol_transition_pending)
+     {
+      error="Symbol data is still changing. No trade request was prepared.";
+      return(false);
+     }
    if(!PS_TradeBuildSnapshot(g_model,g_market,g_calc,snapshot))
      {
       error=snapshot.error;
@@ -473,9 +547,19 @@ void PS_DoMoveStops()
      }
    if(!PS_CommitEditor()) return;
    PS_RefreshMarket(false);
+   if(g_symbol_transition_pending)
+     {
+      PS_SetStatus("Symbol data is still changing. No stop-loss modification was prepared.",true,6000);
+      return;
+     }
 
    PSSlTarget targets[];
    int count=PS_TradeCollectSlTargets(g_model,g_market,targets);
+   if(count<0)
+     {
+      PS_SetStatus("The complete stop-loss target set could not be read or allocated. No modification request was sent.",true,7000);
+      return;
+     }
    if(count<=0)
      {
       PS_SetStatus("No valid current-symbol positions or pending orders need to be moved to the red stop-loss line.",false,6000);
@@ -494,8 +578,17 @@ void PS_DoMoveStops()
         }
 
       PS_RefreshMarket(false);
+      if(g_symbol_transition_pending || !g_market.symbol_ready)
+        {
+         PS_SetStatus("Symbol data changed during confirmation. No stop-loss modification was sent.",true,7000);
+         return;
+        }
       PSSlTarget refreshed[];
-      PS_TradeCollectSlTargets(g_model,g_market,refreshed);
+      if(PS_TradeCollectSlTargets(g_model,g_market,refreshed)<0)
+        {
+         PS_SetStatus("The complete stop-loss target set could not be refreshed. No modification request was sent.",true,7000);
+         return;
+        }
       if(!PS_TradeSlTargetSetsEqual(targets,refreshed,g_market.tick_size))
         {
          if(ArraySize(refreshed)<=0)
@@ -514,16 +607,33 @@ void PS_DoMoveStops()
            }
 
          PS_RefreshMarket(false);
+         if(g_symbol_transition_pending || !g_market.symbol_ready)
+           {
+            PS_SetStatus("Symbol data changed during confirmation. No stop-loss modification was sent.",true,7000);
+            return;
+           }
          PSSlTarget final_targets[];
-         PS_TradeCollectSlTargets(g_model,g_market,final_targets);
+         if(PS_TradeCollectSlTargets(g_model,g_market,final_targets)<0)
+           {
+            PS_SetStatus("The complete stop-loss target set could not be refreshed. No modification request was sent.",true,7000);
+            return;
+           }
          if(!PS_TradeSlTargetSetsEqual(refreshed,final_targets,g_market.tick_size))
            {
             PS_SetStatus("The eligible stop-loss target set changed again before send. No request was sent; click Move SLs to line to retry.",true,8000);
             return;
            }
-         PS_TradeCopySlTargets(targets,final_targets);
+         if(!PS_TradeCopySlTargets(targets,final_targets))
+           {
+            PS_SetStatus("The stop-loss target set could not be allocated. No modification request was sent.",true,7000);
+            return;
+           }
         }
-      else PS_TradeCopySlTargets(targets,refreshed);
+      else if(!PS_TradeCopySlTargets(targets,refreshed))
+        {
+         PS_SetStatus("The stop-loss target set could not be allocated. No modification request was sent.",true,7000);
+         return;
+        }
      }
 
    g_trade_in_flight=true;
@@ -556,6 +666,8 @@ void PS_SetViewModeState(const PSViewMode view_mode)
 
 void PS_Action(const PSControlId control)
   {
+   if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready) return;
+   if(control<0 || control>=PS_CTRL_COUNT || !g_ps_control_visible[(int)control]) return;
    switch(control)
      {
       case PS_CTRL_MANUAL:
@@ -712,7 +824,10 @@ bool PS_UpdateLevelFromPointer(const PSCaptureMode capture,const int x,const int
    // panel once at that boundary so Long/Short changes immediately, while
    // keeping the rest of pointer motion on the lightweight line-only path.
    if(direction_changed)
+     {
       PS_UIRender(g_ui,g_model,g_calc,g_market,g_exposure,g_editor,g_copy_feedback_control);
+      if(!g_ps_panel_render_ready) PS_AbortInteractionForRenderFailure();
+     }
    else
       PS_RenderIfDirty();
    return(true);
@@ -721,6 +836,11 @@ bool PS_UpdateLevelFromPointer(const PSCaptureMode capture,const int x,const int
 
 void PS_UpdateInteractionGuard(const int x,const int y)
   {
+   if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready)
+     {
+      PS_UIGuardExit(g_ui);
+      return;
+     }
    bool handle_hit=false;
    PS_UIHitHandle(x,y,handle_hit);
    bool owns_input=(g_pointer.capture!=PS_CAPTURE_NONE || g_editor.active ||
@@ -759,7 +879,7 @@ void PS_ExposureAction(const PSExposureHit hit,const int visible_row)
       g_exposure_ui.scroll_offset=MathMax(0,g_exposure_ui.scroll_offset-1);
    else if(hit==PS_EXPOSURE_HIT_SCROLL_DOWN)
      {
-      int maximum=MathMax(0,PS_UIExposureFilteredCount(g_exposure)-PS_EXPOSURE_VISIBLE_ROWS);
+      int maximum=MathMax(0,PS_UIExposureFilteredCount(g_exposure)-PS_UIExposurePageCapacity());
       g_exposure_ui.scroll_offset=MathMin(maximum,g_exposure_ui.scroll_offset+1);
      }
    else if(hit==PS_EXPOSURE_HIT_ROW && visible_row>=0)
@@ -834,6 +954,7 @@ void PS_ResetCapture(const int x,const int y)
 
 void PS_MousePress(const int x,const int y)
   {
+   if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready) return;
    ulong started=GetMicrosecondCount();
    int native_x=0;
    int native_y=0;
@@ -991,7 +1112,7 @@ void PS_MousePress(const int x,const int y)
          if(g_exposure.items[i].symbol==_Symbol) filtered_index++;
       g_exposure_ui.details_open=true;
       g_exposure_ui.scope=PS_EXPOSURE_SCOPE_CHART;
-      int maximum=MathMax(0,PS_UIExposureFilteredCount(g_exposure)-PS_EXPOSURE_VISIBLE_ROWS);
+      int maximum=MathMax(0,PS_UIExposureFilteredCount(g_exposure)-PS_UIExposurePageCapacity());
       g_exposure_ui.scroll_offset=PS_ClampInt(filtered_index-3,0,maximum);
       g_exposure_ui.hovered_row=label_item_index;
       g_exposure_hover_until_ms=GetTickCount64()+1500;
@@ -1011,6 +1132,11 @@ void PS_MousePress(const int x,const int y)
 
 void PS_MouseMoveCaptured(const int x,const int y)
   {
+   if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready)
+     {
+      PS_AbortInteractionForContextChange();
+      return;
+     }
    if(g_pointer.capture==PS_CAPTURE_PANEL)
      {
       if(!g_pointer.drag_started)
@@ -1070,12 +1196,41 @@ void PS_MouseMoveCaptured(const int x,const int y)
    g_pointer.last_y=y;
   }
 
+bool PS_PointerAction(const PSControlId control,const int x,const int y)
+  {
+   if(g_model.view_mode==PS_VIEW_FULL &&
+      (control==PS_CTRL_DIRECTION || control==PS_CTRL_ORDER_MODE))
+     {
+      PSRect left;
+      PSRect right;
+      PS_UISplitChoiceRects(g_ps_control_rects[(int)control],left,right);
+      bool choose_left=(PS_RectContains(left,x,y) &&
+                        PS_RectContains(left,g_pointer.start_x,g_pointer.start_y));
+      bool choose_right=(PS_RectContains(right,x,y) &&
+                         PS_RectContains(right,g_pointer.start_x,g_pointer.start_y));
+      // Separate painted buttons need separate click ownership. The gap and a
+      // press/release across two different choices must not change the model.
+      if(!choose_left && !choose_right) return(false);
+      bool left_active=(control==PS_CTRL_DIRECTION ? g_model.direction==PS_DIRECTION_LONG
+                                                   : g_model.order_mode==PS_ORDER_INSTANT);
+      if(choose_left==left_active) return(false);
+     }
+   // Compact and keyboard activation keep their existing single-control toggle.
+   PS_Action(control);
+   return(true);
+  }
+
 void PS_MouseRelease(const int x,const int y)
   {
    // Apply the newest pointer sample before deciding whether this was a click
    // or a drag. Normal movement is frame-paced by OnTimer, while release must
    // always land on the exact final coordinate.
    if(PS_IsMotionCapture()) PS_MouseMoveCaptured(x,y);
+   if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready)
+     {
+      PS_AbortInteractionForContextChange();
+      return;
+     }
    g_pointer_motion_pending=false;
    bool panel_dragged=(g_pointer.capture==PS_CAPTURE_PANEL && g_pointer.drag_started);
    if(panel_dragged)
@@ -1093,8 +1248,8 @@ void PS_MouseRelease(const int x,const int y)
          ulong now=GetTickCount64();
          if(now-g_control_last_action[(int)control]>=300)
            {
-            g_control_last_action[(int)control]=now;
-            PS_Action(control);
+            if(PS_PointerAction(control,x,y))
+               g_control_last_action[(int)control]=now;
            }
         }
      }
@@ -1194,6 +1349,7 @@ void PS_KeyboardFocusNext(const bool reverse)
 
 void PS_HandleKeyDown(const int key)
   {
+   if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready) return;
    if(key==16) g_shift_down=true;
    if(key==17) g_ctrl_down=true;
    if(key==9)
@@ -1215,7 +1371,8 @@ void PS_HandleKeyDown(const int key)
       PS_RenderIfDirty();
       return;
      }
-   if(!g_editor.active && (key==13 || key==32) && g_keyboard_focus!=PS_CTRL_NONE)
+   if(!g_editor.active && (key==13 || key==32) && g_keyboard_focus>=0 &&
+      g_keyboard_focus<PS_CTRL_COUNT && g_ps_control_visible[(int)g_keyboard_focus])
      {
       PS_Action(g_keyboard_focus);
       return;
@@ -1268,6 +1425,11 @@ ulong PS_StepperRepeatInterval(const ulong elapsed)
 
 void PS_TimerStepper()
   {
+   if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready)
+     {
+      PS_AbortInteractionForContextChange();
+      return;
+     }
    if(g_pointer.capture!=PS_CAPTURE_STEPPER || !g_pointer.stepper_active || !g_pointer.stepper_pointer_inside) return;
    ulong now=GetTickCount64();
    ulong elapsed=now-g_pointer.press_ms;
@@ -1282,7 +1444,7 @@ int OnInit()
   {
    if(!MQLInfoInteger(MQL_DLLS_ALLOWED))
      {
-      string message="LotCraft 1.2.0 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
+      string message="LotCraft 1.2.1 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
       PS_LogError(message);
       MessageBox(message,PS_PRODUCT_NAME+" initialization",MB_OK|MB_ICONERROR);
       return(INIT_FAILED);
@@ -1301,6 +1463,8 @@ int OnInit()
    g_pressed_control=PS_CTRL_NONE;
    g_keyboard_focus=PS_CTRL_NONE;
    g_last_exposure_refresh_ms=0;
+   g_exposure_retry_after_ms=0;
+   g_panel_retry_after_ms=0;
    g_pointer.capture=PS_CAPTURE_NONE;
    g_pointer.control=PS_CTRL_NONE;
 
@@ -1348,8 +1512,8 @@ int OnInit()
      }
 
    g_initialized=true;
-   g_update_check_launched=(bool)MQLInfoInteger(MQL_TESTER);
-   g_update_check_start_ms=GetTickCount64();
+   g_update_checks_enabled=!(bool)MQLInfoInteger(MQL_TESTER);
+   g_next_update_check_ms=GetTickCount64()+10000;
    if(g_symbol_transition_pending)
      {
       PS_UIHidePanelContent(g_ui);
@@ -1397,19 +1561,23 @@ void OnTick()
      }
   }
 
+void PS_CheckForUpdates(const ulong now)
+  {
+   if(!g_initialized || !g_update_checks_enabled || now<g_next_update_check_ms) return;
+   // Provide hourly opportunities while attached. The detached updater owns
+   // its shared 24-hour network throttle, mutex, prompt and verification.
+   // Schedule before launch so failures never retry on every UI timer tick.
+   g_next_update_check_ms=now+3600000;
+   string update_error="";
+   if(!PS_PlatformLaunchUpdater(update_error))
+      PS_LogWarningRateLimited("updater.launch",update_error,60000);
+  }
+
 void OnTimer()
   {
    if(!g_initialized) return;
    ulong now=GetTickCount64();
-   if(!g_update_check_launched && now-g_update_check_start_ms>=10000)
-     {
-      // Launch once and return immediately. The detached updater owns all
-      // network, prompting, verification, and installation work.
-      g_update_check_launched=true;
-      string update_error="";
-      if(!PS_PlatformLaunchUpdater(update_error))
-         PS_LogWarningRateLimited("updater.launch",update_error,60000);
-     }
+   PS_CheckForUpdates(now);
 
    int pointer_x=g_pointer.last_x;
    int pointer_y=g_pointer.last_y;
@@ -1540,7 +1708,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
       int y=(int)(short)(lparam>>16);
       if(g_exposure_ui.details_open && PS_RectContains(g_exposure_ui.sidecar_rect,x,y))
         {
-         int maximum=MathMax(0,PS_UIExposureFilteredCount(g_exposure)-PS_EXPOSURE_VISIBLE_ROWS);
+         int maximum=MathMax(0,PS_UIExposureFilteredCount(g_exposure)-PS_UIExposurePageCapacity());
          if(dparam>0.0) g_exposure_ui.scroll_offset=MathMax(0,g_exposure_ui.scroll_offset-1);
          else if(dparam<0.0) g_exposure_ui.scroll_offset=MathMin(maximum,g_exposure_ui.scroll_offset+1);
          g_exposure_details_dirty=true;

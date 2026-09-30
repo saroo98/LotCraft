@@ -49,7 +49,7 @@ color PS_ThemeBackground()   { return(g_ps_light_theme ? C'226,232,239' : PS_PRE
 color PS_ThemePanel()        { return(g_ps_light_theme ? C'250,252,255' : PS_PREMIUM_PANEL); }
 color PS_ThemeSection()      { return(g_ps_light_theme ? C'244,247,251' : PS_PREMIUM_SECTION); }
 color PS_ThemeControl()      { return(g_ps_light_theme ? C'255,255,255' : PS_PREMIUM_CONTROL); }
-color PS_ThemeAction()       { return(PS_PREMIUM_BLUE); }
+color PS_ThemeAction()       { return(C'42,108,205'); }
 color PS_ThemeLoss()         { return(g_ps_light_theme ? C'180,35,47' : C'255,122,131'); }
 color PS_ThemeProfit()       { return(g_ps_light_theme ? C'27,122,70' : C'80,211,135'); }
 color PS_ThemeIncomplete()   { return(g_ps_light_theme ? C'151,91,0' : C'242,180,72'); }
@@ -74,8 +74,21 @@ color PS_ThemeNoticeText()   { return(g_ps_light_theme ? C'45,78,112' : C'181,20
 color PS_ThemeErrorPanel()   { return(g_ps_light_theme ? C'255,235,237' : C'67,25,31'); }
 color PS_ThemeErrorText()    { return(g_ps_light_theme ? C'145,38,46' : C'255,178,183'); }
 
+// Small white labels need stronger contrast than the chart-line palette.
+// Change filled controls only; preserve the established Entry/SL/TP line colors.
+color PS_UIAccessibleAccent(const color accent)
+  {
+   if(accent==PS_PREMIUM_GREEN || accent==PS_CLR_LONG) return(C'24,124,62');
+   if(accent==PS_CLR_SHORT) return(C'188,45,58');
+   if(accent==PS_PREMIUM_BLUE || accent==PS_CLR_ACCENT) return(C'42,108,205');
+   return(accent);
+  }
+
 PSRect g_ps_control_rects[PS_CTRL_COUNT];
 bool   g_ps_control_visible[PS_CTRL_COUNT];
+int    g_ps_field_view_start[PS_CTRL_COUNT];
+int    g_ps_field_view_end[PS_CTRL_COUNT];
+bool   g_ps_field_view_active[PS_CTRL_COUNT];
 PSRect g_ps_handle_rects[3];
 bool   g_ps_handle_visible[3];
 CCanvas g_ps_handle_canvas[3];
@@ -88,10 +101,12 @@ bool    g_ps_drag_canvas_created=false;
 string  g_ps_drag_canvas_name="";
 CCanvas g_ps_panel_canvas;
 bool    g_ps_panel_canvas_created=false;
+bool    g_ps_panel_render_ready=false;
 string  g_ps_panel_canvas_name="";
 const int PS_EXPOSURE_VISIBLE_ROWS=8;
 CCanvas g_ps_exposure_canvas;
 bool    g_ps_exposure_canvas_created=false;
+ulong   g_ps_exposure_retry_after_ms=0;
 string  g_ps_exposure_canvas_name="";
 #define PS_EXPOSURE_LABEL_MAX 128
 CCanvas g_ps_exposure_label_canvas[PS_EXPOSURE_LABEL_MAX];
@@ -100,6 +115,7 @@ string  g_ps_exposure_label_canvas_name[PS_EXPOSURE_LABEL_MAX];
 PSRect  g_ps_exposure_label_rects[PS_EXPOSURE_LABEL_MAX];
 int     g_ps_exposure_label_item_indexes[PS_EXPOSURE_LABEL_MAX];
 int     g_ps_exposure_label_count=0;
+bool    g_ps_exposure_labels_layout_dirty=true;
 PSControlId g_hovered_control=PS_CTRL_NONE;
 PSControlId g_pressed_control=PS_CTRL_NONE;
 PSControlId g_keyboard_focus=PS_CTRL_NONE;
@@ -316,23 +332,26 @@ void PS_UILayout(PSUIState &ui,const PSViewMode view_mode)
       int compact_row=PS_U(99);
       const int small_control_w=PS_U(38);
       const int small_gap=PS_U(6);
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_ENTRY_FIELD],x+PS_U(75),y+compact_row,PS_U(157),PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_ENTRY_MINUS],x+PS_U(238),y+compact_row,small_control_w,PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_ENTRY_PLUS],x+PS_U(238)+small_control_w+small_gap,y+compact_row,small_control_w,PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_ENTRY_COPY],x+PS_U(238)+2*(small_control_w+small_gap),y+compact_row,small_control_w,PS_U(26));
+      const int cluster_w=3*small_control_w+2*small_gap;
+      const int cluster_x=x+PS_U(356)-cluster_w;
+      const int field_w=cluster_x-small_gap-(x+PS_U(75));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_ENTRY_FIELD],x+PS_U(75),y+compact_row,field_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_ENTRY_MINUS],cluster_x,y+compact_row,small_control_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_ENTRY_PLUS],cluster_x+small_control_w+small_gap,y+compact_row,small_control_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_ENTRY_COPY],cluster_x+2*(small_control_w+small_gap),y+compact_row,small_control_w,PS_U(26));
       compact_row+=PS_U(30);
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_STOP_FIELD],x+PS_U(75),y+compact_row,PS_U(157),PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_STOP_MINUS],x+PS_U(238),y+compact_row,small_control_w,PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_STOP_PLUS],x+PS_U(238)+small_control_w+small_gap,y+compact_row,small_control_w,PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_STOP_COPY],x+PS_U(238)+2*(small_control_w+small_gap),y+compact_row,small_control_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_STOP_FIELD],x+PS_U(75),y+compact_row,field_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_STOP_MINUS],cluster_x,y+compact_row,small_control_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_STOP_PLUS],cluster_x+small_control_w+small_gap,y+compact_row,small_control_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_STOP_COPY],cluster_x+2*(small_control_w+small_gap),y+compact_row,small_control_w,PS_U(26));
       compact_row+=PS_U(30);
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_TAKE_FIELD],x+PS_U(75),y+compact_row,PS_U(157),PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_TAKE_MINUS],x+PS_U(238),y+compact_row,small_control_w,PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_TAKE_PLUS],x+PS_U(238)+small_control_w+small_gap,y+compact_row,small_control_w,PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_TAKE_COPY],x+PS_U(238)+2*(small_control_w+small_gap),y+compact_row,small_control_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_TAKE_FIELD],x+PS_U(75),y+compact_row,field_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_TAKE_MINUS],cluster_x,y+compact_row,small_control_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_TAKE_PLUS],cluster_x+small_control_w+small_gap,y+compact_row,small_control_w,PS_U(26));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_TAKE_COPY],cluster_x+2*(small_control_w+small_gap),y+compact_row,small_control_w,PS_U(26));
       // Keep the line-state control below the TP minus/plus/copy cluster.
       // The shared width and right edge make this a separate, aligned control.
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_LINES],x+PS_U(238),y+PS_U(189),PS_U(126),PS_U(22));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_LINES],cluster_x,y+PS_U(189),cluster_w,PS_U(22));
 
       PS_UISetRect(g_ps_control_rects[PS_CTRL_ACCOUNT_MODE],x+PS_U(75),y+PS_U(231),PS_U(101),PS_U(26));
       PS_UISetRect(g_ps_control_rects[PS_CTRL_ACCOUNT_FIELD],x+PS_U(182),y+PS_U(231),PS_U(173),PS_U(26));
@@ -343,14 +362,14 @@ void PS_UILayout(PSUIState &ui,const PSViewMode view_mode)
       PS_UISetRect(g_ps_control_rects[PS_CTRL_ACTUAL_MONEY],x+PS_U(239),y+PS_U(276),PS_U(117),PS_U(26));
       PS_UISetRect(g_ps_control_rects[PS_CTRL_POSITION_SIZE],x+PS_U(75),y+PS_U(308),PS_U(237),PS_U(26));
       PS_UISetRect(g_ps_control_rects[PS_CTRL_POSITION_COPY],x+PS_U(318),y+PS_U(308),PS_U(37),PS_U(26));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(14),y+PS_U(342),PS_U(344),PS_U(42));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(14),y+PS_U(342),PS_U(344),PS_U(64));
       int content_x=x+PS_U(8);
       const int content_w=PS_U(356);
       const int action_gap=PS_U(6);
       const int action_w=(content_w-action_gap)/2;
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_CONFIRM],content_x,y+PS_U(392),action_w,PS_U(32));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_SLS],content_x+action_w+action_gap,y+PS_U(392),action_w,PS_U(32));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_TRADE],content_x,y+PS_U(430),content_w,PS_U(34));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_CONFIRM],content_x,y+PS_U(414),action_w,PS_U(32));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_SLS],content_x+action_w+action_gap,y+PS_U(414),action_w,PS_U(32));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_TRADE],content_x,y+PS_U(452),content_w,PS_U(34));
 
       for(int i=0;i<PS_CTRL_COUNT;i++)
          g_ps_control_visible[i]=(g_ps_control_rects[i].w>0 && g_ps_control_rects[i].h>0);
@@ -396,14 +415,14 @@ void PS_UILayout(PSUIState &ui,const PSViewMode view_mode)
    PS_UISetRect(g_ps_control_rects[PS_CTRL_ACTUAL_MONEY],x+PS_U(281),y+PS_U(305),PS_U(137),PS_U(28));
    PS_UISetRect(g_ps_control_rects[PS_CTRL_POSITION_SIZE],x+PS_U(92),y+PS_U(341),PS_U(281),PS_U(28));
    PS_UISetRect(g_ps_control_rects[PS_CTRL_POSITION_COPY],x+PS_U(379),y+PS_U(341),PS_U(39),PS_U(28));
-   PS_UISetRect(g_ps_control_rects[PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(18),y+PS_U(379),PS_U(402),PS_U(48));
+   PS_UISetRect(g_ps_control_rects[PS_CTRL_EXPOSURE_SUMMARY],x+PS_U(18),y+PS_U(379),PS_U(402),PS_U(66));
    int content_x=x+PS_U(10);
    const int content_w=PS_U(418);
    const int action_gap=PS_U(6);
    const int action_w=(content_w-action_gap)/2;
-   PS_UISetRect(g_ps_control_rects[PS_CTRL_CONFIRM],content_x,y+PS_U(437),action_w,PS_U(36));
-   PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_SLS],content_x+action_w+action_gap,y+PS_U(437),action_w,PS_U(36));
-   PS_UISetRect(g_ps_control_rects[PS_CTRL_TRADE],content_x,y+PS_U(481),content_w,PS_U(40));
+   PS_UISetRect(g_ps_control_rects[PS_CTRL_CONFIRM],content_x,y+PS_U(455),action_w,PS_U(36));
+   PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_SLS],content_x+action_w+action_gap,y+PS_U(455),action_w,PS_U(36));
+   PS_UISetRect(g_ps_control_rects[PS_CTRL_TRADE],content_x,y+PS_U(499),content_w,PS_U(40));
 
    for(int i=0;i<PS_CTRL_COUNT;i++)
       g_ps_control_visible[i]=(g_ps_control_rects[i].w>0 && g_ps_control_rects[i].h>0);
@@ -512,9 +531,11 @@ bool PS_UIEnsureHandleCanvas(const PSUIState &ui,const PSLevelId level,
       PS_UIHandleCanvasDestroy(index);
 
    bool repaint=false;
+   int width=PS_U(36);
+   int height=PS_U(26);
    if(!g_ps_handle_canvas_created[index])
      {
-      if(!g_ps_handle_canvas[index].CreateBitmapLabel(ChartID(),0,name,0,0,36,26,
+      if(!g_ps_handle_canvas[index].CreateBitmapLabel(ChartID(),0,name,0,0,width,height,
                                                       COLOR_FORMAT_XRGB_NOALPHA))
         {
          PS_LogError(StringFormat("Cannot create handle canvas %s (error %d).",name,GetLastError()));
@@ -530,6 +551,11 @@ bool PS_UIEnsureHandleCanvas(const PSUIState &ui,const PSLevelId level,
       ObjectSetString(ChartID(),name,OBJPROP_TOOLTIP,"\n");
       repaint=true;
      }
+   else if(g_ps_handle_canvas[index].Width()!=width || g_ps_handle_canvas[index].Height()!=height)
+     {
+      if(!g_ps_handle_canvas[index].Resize(width,height)) return(false);
+      repaint=true;
+     }
 
    // Match chart-object click ownership to the custom hit-test contract.
    // Stop owns overlapping pixels, Entry is next, and Take-profit is lowest.
@@ -540,10 +566,10 @@ bool PS_UIEnsureHandleCanvas(const PSUIState &ui,const PSLevelId level,
       repaint=true;
    if(repaint)
      {
-      g_ps_handle_canvas[index].Erase(COLOR2RGB(background));
-      g_ps_handle_canvas[index].Rectangle(0,0,35,25,COLOR2RGB(C'10,12,16'));
+      g_ps_handle_canvas[index].Erase(COLOR2RGB(PS_UIAccessibleAccent(background)));
+      g_ps_handle_canvas[index].Rectangle(0,0,width-1,height-1,COLOR2RGB(C'10,12,16'));
       g_ps_handle_canvas[index].FontSet("Segoe UI Semibold",-10*PS_Font(10));
-      g_ps_handle_canvas[index].TextOut(18,13,text,COLOR2RGB(PS_CLR_TEXT),TA_CENTER|TA_VCENTER);
+      g_ps_handle_canvas[index].TextOut(width/2,height/2,text,COLOR2RGB(PS_ThemeOnAccent()),TA_CENTER|TA_VCENTER);
       g_ps_handle_canvas[index].Update(false);
       g_ps_handle_canvas_color[index]=background;
       g_ps_handle_canvas_text[index]=text;
@@ -555,7 +581,7 @@ void PS_UISetHandle(const PSUIState &ui,const PSLevelId level,const int x,const 
                      const string text,const color background,const bool show)
   {
    PSRect rect;
-   PS_UISetRect(rect,x,y,36,26);
+   PS_UISetRect(rect,x,y,PS_U(36),PS_U(26));
    int index=(int)level;
    g_ps_handle_rects[index]=rect;
    g_ps_handle_visible[index]=show;
@@ -563,7 +589,13 @@ void PS_UISetHandle(const PSUIState &ui,const PSLevelId level,const int x,const 
    PS_UIShow(ui,"handle."+id+".box",false);
    PS_UIShow(ui,"handle."+id+".text",false);
    if(!show && !g_ps_handle_canvas_created[index]) return;
-   if(!PS_UIEnsureHandleCanvas(ui,level,text,background)) return;
+   if(!PS_UIEnsureHandleCanvas(ui,level,text,background))
+     {
+      g_ps_handle_visible[index]=false;
+      if(g_ps_handle_canvas_created[index])
+         ObjectSetInteger(ChartID(),g_ps_handle_canvas_name[index],OBJPROP_TIMEFRAMES,OBJ_NO_PERIODS);
+      return;
+     }
 
    string name=g_ps_handle_canvas_name[index];
    if(show)
@@ -578,17 +610,17 @@ void PS_UISetHandle(const PSUIState &ui,const PSLevelId level,const int x,const 
 
 int PS_UIHandleX(const PSUIState &ui,const int y)
   {
-   int x=ui.chart_w-54;
+   int x=ui.chart_w-PS_U(54);
    PSRect candidate;
-   PS_UISetRect(candidate,x,y-13,36,26);
+   PS_UISetRect(candidate,x,y-PS_U(13),PS_U(36),PS_U(26));
    PSRect panel;
    PS_UISetRect(panel,ui.panel_x,ui.panel_y,ui.panel_w,ui.panel_h);
    bool intersects=!(candidate.x+candidate.w<=panel.x || candidate.x>=panel.x+panel.w ||
                      candidate.y+candidate.h<=panel.y || candidate.y>=panel.y+panel.h);
    if(!intersects) return(x);
-   if(panel.x>=42) return(panel.x-40);
-   if(panel.x+panel.w+42<ui.chart_w) return(panel.x+panel.w+6);
-   return(4);
+   if(panel.x>=PS_U(42)) return(panel.x-PS_U(40));
+   if(panel.x+panel.w+PS_U(42)<ui.chart_w) return(panel.x+panel.w+PS_U(6));
+   return(PS_U(4));
   }
 
 void PS_UIUpdateLines(PSUIState &ui,const PSModel &model,const PSMarketSnapshot &market)
@@ -631,19 +663,65 @@ void PS_UIUpdateLines(PSUIState &ui,const PSModel &model,const PSMarketSnapshot 
    colors[1]=stop_color;
    colors[2]=take_color;
 
-   // Deterministic paint order: Take-profit, Entry, then Stop on top.
-   int paint_order[3]={2,0,1};
-   for(int paint_index=0;paint_index<3;paint_index++)
+   PSRect handles[3];
+   bool visible[3];
+   for(int i=0;i<3;i++)
      {
-      int i=paint_order[paint_index];
       bool viewport=requested[i] && prices[i]>=price_min && prices[i]<=price_max;
       int px=0;
       int py=0;
       bool converted=false;
       if(viewport) converted=ChartTimePriceToXY(ChartID(),0,time,prices[i],px,py);
-      bool visible=viewport && converted && py>=0 && py<ui.chart_h;
-      int hx=(visible ? PS_UIHandleX(ui,py) : 0);
-      PS_UISetHandle(ui,(PSLevelId)i,hx,(visible ? py-13 : 0),letters[i],colors[i],visible);
+      visible[i]=viewport && converted && py>=0 && py<ui.chart_h;
+      int hx=(visible[i] ? PS_UIHandleX(ui,py) : 0);
+      PS_UISetRect(handles[i],hx,(visible[i] ? py-PS_U(13) : 0),PS_U(36),PS_U(26));
+     }
+
+   // Preserve every price/Y coordinate. Put nearby handles in separate
+   // horizontal lanes, with Stop retaining the first choice of position.
+   PSRect panel;
+   PS_UISetRect(panel,ui.panel_x,ui.panel_y,ui.panel_w,ui.panel_h);
+   int priority[3]={1,0,2};
+   for(int n=0;n<3;n++)
+     {
+      int i=priority[n];
+      if(!visible[i]) continue;
+      int origin=handles[i].x;
+      int step=handles[i].w+PS_U(6);
+      for(int lane=0;lane<7;lane++)
+        {
+         PSRect candidate;
+         PS_UISetRect(candidate,origin,handles[i].y,handles[i].w,handles[i].h);
+         if(lane==1) candidate.x=origin-step;
+         else if(lane==2) candidate.x=origin-2*step;
+         else if(lane==3) candidate.x=origin+step;
+         else if(lane==4) candidate.x=origin+2*step;
+         else if(lane==5) candidate.x=panel.x-candidate.w-PS_U(6);
+         else if(lane==6) candidate.x=panel.x+panel.w+PS_U(6);
+         if(candidate.x<0 || candidate.x+candidate.w>ui.chart_w ||
+            PS_UIRectIntersects(candidate,panel)) continue;
+         bool overlap=false;
+         for(int placed=0;placed<n;placed++)
+           {
+            int other=priority[placed];
+            if(visible[other] && PS_UIRectIntersects(candidate,handles[other])) overlap=true;
+           }
+         if(overlap) continue;
+         handles[i].x=candidate.x;
+         break;
+        }
+     }
+
+   // Deterministic paint order: Take-profit, Entry, then Stop on top.
+   int paint_order[3]={2,0,1};
+   for(int n=0;n<3;n++)
+     {
+      int i=paint_order[n];
+      if(g_ps_handle_visible[i]!=visible[i] ||
+         (visible[i] && (g_ps_handle_rects[i].x!=handles[i].x ||
+                        g_ps_handle_rects[i].w!=handles[i].w)))
+         g_ps_exposure_labels_layout_dirty=true;
+      PS_UISetHandle(ui,(PSLevelId)i,handles[i].x,handles[i].y,letters[i],colors[i],visible[i]);
      }
    ui.line_dirty=false;
   }
@@ -690,6 +768,7 @@ uint PS_PremiumColor(const color value)
 
 void PS_UIPanelCanvasDestroy()
   {
+   g_ps_panel_render_ready=false;
    if(g_ps_panel_canvas_created) g_ps_panel_canvas.Destroy();
    g_ps_panel_canvas_created=false;
    g_ps_panel_canvas_name="";
@@ -785,8 +864,8 @@ void PS_PremiumButton(const PSRect &absolute,const string text,const bool active
   {
    int x=absolute.x;
    int y=absolute.y;
-   color fill=(active ? accent : PS_ThemeControl());
-   color border=(active ? accent : PS_ThemeBorder());
+   color fill=(active ? PS_UIAccessibleAccent(accent) : PS_ThemeControl());
+   color border=(active ? fill : PS_ThemeBorder());
    PS_PremiumRoundRect(x,y,absolute.w,absolute.h,4,fill,border);
    int rendered_size=MathMax(8,(font_size+1)/2);
    PS_PremiumText((centered ? x+absolute.w/2 : x+9),y+absolute.h/2,text,rendered_size,
@@ -1015,7 +1094,7 @@ string PS_UIRiskMoneyDisplay(const PSModel &model,const PSCalcResult &calc,
 
 string PS_UIActualRiskMoneyDisplay(const PSCalcResult &calc,const PSMarketSnapshot &market)
   {
-   if(!calc.valid || !PS_IsFinite(calc.actual_money)) return("—");
+   if(!calc.sizing_available || !PS_IsFinite(calc.actual_money)) return("—");
    return(PS_FormatMoneyDisplay(calc.actual_money,market));
   }
 
@@ -1023,6 +1102,7 @@ void PS_UIExposureCanvasDestroy()
   {
    if(g_ps_exposure_canvas_created) g_ps_exposure_canvas.Destroy();
    g_ps_exposure_canvas_created=false;
+   g_ps_exposure_retry_after_ms=0;
    g_ps_exposure_canvas_name="";
   }
 
@@ -1122,7 +1202,7 @@ string PS_UITradeText(const PSModel &model,const PSCalcResult &calc,
        if(calc.issue==PS_CALC_ISSUE_SESSION) return("Market closed");
        if(calc.issue==PS_CALC_ISSUE_QUOTE) return("Waiting for live quote");
        if(calc.issue==PS_CALC_ISSUE_PERMISSION) return("Trading disabled");
-       return("Cannot trade");
+       return(PS_CalcIssueText(calc.issue));
      }
    string volume=PS_VolumeText(calc.volume,market);
    if(model.order_mode==PS_ORDER_INSTANT)
@@ -1348,26 +1428,69 @@ void PS_PremiumControlRect(const PSUIState &ui,const PSControlId control,PSRect 
    rect.y-=ui.panel_y;
   }
 
+int PS_UIFieldPadding(const PSUIState &ui,const PSControlId control)
+  {
+   if(control==PS_CTRL_RISK_MONEY_FIELD || control==PS_CTRL_ACTUAL_MONEY) return(PS_U(10));
+   return(ui.panel_w==g_ps_metrics.mini_w ? PS_U(10) :
+          (ui.panel_w==g_ps_metrics.compact_w ? PS_U(12) : PS_U(13)));
+  }
+
+// Field clipping is by measured complete characters, not a second bitmap or
+// silent numeric truncation. The active editor scrolls to keep its caret visible.
+void PS_UIFieldViewport(const string text,const int cursor,const int width,int &start,int &finish)
+  {
+   int length=StringLen(text);
+   int caret=PS_ClampInt(cursor,0,length);
+   start=PS_ClampInt(start,0,caret);
+   while(start<caret && g_ps_panel_canvas.TextWidth(StringSubstr(text,start,caret-start))>width) start++;
+   finish=start;
+   while(finish<length && g_ps_panel_canvas.TextWidth(StringSubstr(text,start,finish-start+1))<=width) finish++;
+  }
+
+string PS_UIFitText(CCanvas &canvas,const string text,const int width,int &size,
+                    const string font="Segoe UI Semibold")
+  {
+   canvas.FontSet(font,-10*PS_Font(size));
+   while(size>7 && canvas.TextWidth(text)>width)
+     {
+      size--;
+      canvas.FontSet(font,-10*PS_Font(size));
+     }
+   if(canvas.TextWidth(text)<=width) return(text);
+   string suffix="...";
+   if(canvas.TextWidth(suffix)>width) return("");
+   int length=StringLen(text);
+   while(length>0 && canvas.TextWidth(StringSubstr(text,0,length)+suffix)>width) length--;
+   return(StringSubstr(text,0,length)+suffix);
+  }
+
+int PS_UITextHeight(CCanvas &canvas,const string text,const int size)
+  {
+   canvas.FontSet("Segoe UI Semibold",-10*PS_Font(size));
+   return(canvas.TextHeight(text));
+  }
+
 int PS_UIEditorCursorIndex(const PSUIState &ui,const PSControlId control,
                            const string text,const int chart_x)
   {
    if(control<0 || control>=PS_CTRL_COUNT) return(0);
    PSRect rect=g_ps_control_rects[(int)control];
-   int padding=(ui.panel_w==g_ps_metrics.mini_w ? PS_U(10) :
-                (ui.panel_w==g_ps_metrics.compact_w ? PS_U(12) : PS_U(13)));
+   int padding=PS_UIFieldPadding(ui,control);
    int local_x=chart_x-rect.x-padding;
-   if(local_x<=0) return(0);
-
    g_ps_panel_canvas.FontSet("Segoe UI Semibold",-10*PS_Font(11));
    int length=StringLen(text);
+   int start=(g_ps_field_view_active[(int)control] ? PS_ClampInt(g_ps_field_view_start[(int)control],0,length) : 0);
+   int finish=(g_ps_field_view_active[(int)control] ? PS_ClampInt(g_ps_field_view_end[(int)control],start,length) : length);
+   if(local_x<=0) return(MathMax(0,start-1));
+   if(local_x>=rect.w-2*padding && finish<length) return(finish+1);
    int previous_width=0;
-   for(int index=0;index<length;index++)
+   for(int index=start;index<finish;index++)
      {
-      int next_width=g_ps_panel_canvas.TextWidth(StringSubstr(text,0,index+1));
+      int next_width=g_ps_panel_canvas.TextWidth(StringSubstr(text,start,index-start+1));
       if(local_x<(previous_width+next_width)/2) return(index);
       previous_width=next_width;
      }
-   return(length);
+   return(finish);
   }
 
 void PS_PremiumControlButton(const PSUIState &ui,const PSControlId control,const string text,
@@ -1468,16 +1591,21 @@ void PS_PremiumSmallControl(const PSUIState &ui,const PSControlId control,const 
                     (copied ? PS_PREMIUM_GREEN : PS_PREMIUM_BLUE),20,true);
   }
 
+void PS_UISplitChoiceRects(const PSRect &rect,PSRect &left,PSRect &right)
+  {
+   const int gap=PS_U(8);
+   int half=(rect.w-gap)/2;
+   PS_UISetRect(left,rect.x,rect.y,half,rect.h);
+   PS_UISetRect(right,rect.x+half+gap,rect.y,rect.w-half-gap,rect.h);
+  }
+
 void PS_PremiumDrawDirection(const PSUIState &ui,const PSModel &model)
   {
    PSRect rect;
    PS_PremiumControlRect(ui,PS_CTRL_DIRECTION,rect);
-   const int gap=PS_U(8);
-   int half=(rect.w-gap)/2;
    PSRect left;
-   PS_UISetRect(left,rect.x,rect.y,half,rect.h);
    PSRect right;
-   PS_UISetRect(right,rect.x+half+gap,rect.y,rect.w-half-gap,rect.h);
+   PS_UISplitChoiceRects(rect,left,right);
    bool long_active=(model.direction==PS_DIRECTION_LONG);
    bool short_active=(model.direction==PS_DIRECTION_SHORT);
    PS_PremiumButton(left,"",long_active,PS_PREMIUM_GREEN,27,true);
@@ -1494,12 +1622,9 @@ void PS_PremiumDrawOrderMode(const PSUIState &ui,const PSModel &model)
   {
    PSRect rect;
    PS_PremiumControlRect(ui,PS_CTRL_ORDER_MODE,rect);
-   const int gap=PS_U(8);
-   int half=(rect.w-gap)/2;
    PSRect left;
-   PS_UISetRect(left,rect.x,rect.y,half,rect.h);
    PSRect right;
-   PS_UISetRect(right,rect.x+half+gap,rect.y,rect.w-half-gap,rect.h);
+   PS_UISplitChoiceRects(rect,left,right);
    bool instant_active=(model.order_mode==PS_ORDER_INSTANT);
    bool pending_active=(model.order_mode==PS_ORDER_PENDING);
    PS_PremiumButton(left,"",instant_active,PS_ThemeAction(),27,true);
@@ -1547,15 +1672,30 @@ void PS_PremiumCompactField(const PSUIState &ui,const PSControlId control,const 
    color fill=(read_only ? PS_ThemeReadOnly() : PS_ThemeField());
    color border=(focused ? PS_ThemeAction() : (authority ? PS_ThemeAction() : PS_ThemeBorder()));
    PS_PremiumRoundRect(rect.x,rect.y,rect.w,rect.h,4,fill,border);
+   int available=MathMax(0,rect.w-2*scaled_padding-1);
+   int size=font_size;
+   int start=0;
+   int finish=StringLen(text);
+   string display=text;
+   g_ps_panel_canvas.FontSet("Segoe UI Semibold",-10*PS_Font(size));
+   if(focused)
+     {
+      start=(g_ps_field_view_active[(int)control] ? g_ps_field_view_start[(int)control] : 0);
+      PS_UIFieldViewport(text,editor.cursor,available,start,finish);
+      display=StringSubstr(text,start,finish-start);
+     }
+   else display=PS_UIFitText(g_ps_panel_canvas,text,available,size);
+   g_ps_field_view_start[(int)control]=start;
+   g_ps_field_view_end[(int)control]=finish;
+   g_ps_field_view_active[(int)control]=focused;
    if(selected)
      {
-      g_ps_panel_canvas.FontSet("Segoe UI Semibold",-10*PS_Font(font_size));
-      int selection_start=PS_EditorSelectionStart(editor);
-      int selection_end=PS_EditorSelectionEnd(editor);
+      int selection_start=PS_ClampInt(PS_EditorSelectionStart(editor),start,finish);
+      int selection_end=PS_ClampInt(PS_EditorSelectionEnd(editor),start,finish);
       int selection_x=rect.x+scaled_padding+
-                      g_ps_panel_canvas.TextWidth(StringSubstr(text,0,selection_start));
+                      g_ps_panel_canvas.TextWidth(StringSubstr(text,start,selection_start-start));
       int selection_right=rect.x+scaled_padding+
-                          g_ps_panel_canvas.TextWidth(StringSubstr(text,0,selection_end));
+                          g_ps_panel_canvas.TextWidth(StringSubstr(text,start,selection_end-start));
       if(selection_right>selection_x)
          g_ps_panel_canvas.FillRectangle(selection_x,rect.y+PS_U(4),selection_right,rect.y+rect.h-PS_U(4),
                                          PS_PremiumColor(PS_ThemeSelection()));
@@ -1563,12 +1703,12 @@ void PS_PremiumCompactField(const PSUIState &ui,const PSControlId control,const 
     color text_color=(text_color_override==clrNONE
                       ? (read_only ? PS_ThemeReadOnlyText() : PS_ThemeText())
                       : text_color_override);
-    PS_PremiumText(rect.x+scaled_padding,rect.y+rect.h/2,text,font_size,text_color,
+    PS_PremiumText(rect.x+scaled_padding,rect.y+rect.h/2,display,size,text_color,
                     TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
    if(focused && !editor.has_selection)
      {
-      g_ps_panel_canvas.FontSet("Segoe UI Semibold",-10*PS_Font(font_size));
-       string prefix=StringSubstr(editor.raw_text,0,editor.cursor);
+      g_ps_panel_canvas.FontSet("Segoe UI Semibold",-10*PS_Font(size));
+       string prefix=StringSubstr(text,start,PS_ClampInt(editor.cursor,start,finish)-start);
        int caret_x=rect.x+scaled_padding+g_ps_panel_canvas.TextWidth(prefix);
        g_ps_panel_canvas.FillRectangle(caret_x,rect.y+PS_U(7),caret_x,rect.y+rect.h-PS_U(7),
                                        PS_PremiumColor(PS_ThemeText()));
@@ -1625,22 +1765,36 @@ string PS_UIExposureWarning(const PSExposureSnapshot &exposure)
    return(warning);
   }
 
-void PS_UIExposureTile(const PSRect &rect,const string label,const bool available,
+void PS_UIExposureTile(const PSRect &rect,const string label,const bool available,const bool percent_available,
                        const double percent,const double money,const bool compact,
                        const bool warning,const PSMarketSnapshot &market)
   {
    PS_PremiumRoundRect(rect.x,rect.y,rect.w,rect.h,4,PS_ThemeControl(),PS_ThemeBorder());
-   string percent_text=(available ? DoubleToString(percent,2)+"%" : "—");
-   string money_text=(available ? PS_FormatMoneyDisplay(money,market) : "—");
+   string percent_text=(!available ? "Unavailable" :
+                        (warning ? "Incomplete" : (percent_available ? DoubleToString(percent,2)+"%" : "—")));
+   string money_text=(available ? (warning ? "Known " : "")+PS_FormatMoneyDisplay(money,market) : "—");
    int label_size=(compact ? 7 : 8);
    int percent_size=(compact ? 9 : 10);
    int money_size=(compact ? 7 : 8);
-    int label_y=rect.y+PS_U(compact ? 6 : 8);
-    int percent_y=rect.y+PS_U(compact ? 20 : 23);
-    int money_y=rect.y+PS_U(compact ? 34 : 38);
-   PS_PremiumText(rect.x+rect.w/2,label_y,label,label_size,PS_ThemeMuted(),
+   int text_w=MathMax(0,rect.w-PS_U(20));
+   string label_text=PS_UIFitText(g_ps_panel_canvas,label,text_w,label_size);
+   percent_text=PS_UIFitText(g_ps_panel_canvas,percent_text,text_w,percent_size);
+   money_text=PS_UIFitText(g_ps_panel_canvas,money_text,text_w,money_size);
+   int label_h=PS_UITextHeight(g_ps_panel_canvas,label_text,label_size);
+   int percent_h=PS_UITextHeight(g_ps_panel_canvas,percent_text,percent_size);
+   int money_h=PS_UITextHeight(g_ps_panel_canvas,money_text,money_size);
+   int gap=PS_U(2);
+   int block_h=label_h+percent_h+money_h+2*gap;
+   int top=rect.y+MathMax(PS_U(6),(rect.h-block_h)/2);
+   // Align measured line boxes. The optical offset is canceled here so the
+   // requested inset describes visible text bounds, not just its center point.
+   int label_y=top+label_h/2+PS_PremiumOpticalCenterOffset(label_size);
+   int percent_y=top+label_h+gap+percent_h/2+PS_PremiumOpticalCenterOffset(percent_size);
+   int money_y=top+label_h+gap+percent_h+gap+money_h/2+PS_PremiumOpticalCenterOffset(money_size);
+   PS_PremiumText(rect.x+rect.w/2,label_y,label_text,label_size,PS_ThemeMuted(),
                   TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
-   PS_PremiumText(rect.x+rect.w/2,percent_y,percent_text,percent_size,PS_ThemeLoss(),
+   PS_PremiumText(rect.x+rect.w/2,percent_y,percent_text,percent_size,
+                  (warning || !available ? PS_ThemeIncomplete() : PS_ThemeLoss()),
                   TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
    PS_PremiumText(rect.x+rect.w/2,money_y,money_text,money_size,PS_ThemeText(),
                   TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
@@ -1654,18 +1808,20 @@ void PS_UIExposureSummary(const PSUIState &ui,const PSExposureSnapshot &exposure
   {
    PSRect rect;
    PS_PremiumControlRect(ui,PS_CTRL_EXPOSURE_SUMMARY,rect);
-   bool available=(exposure.equity_basis>0.0);
-   bool warning=(PS_UIExposureWarning(exposure)!="");
+   bool available=exposure.enumeration_valid;
+   bool percent_available=(available && exposure.equity_basis>0.0);
+   bool chart_warning=(!available || exposure.chart_no_sl>0 || exposure.chart_unavailable>0);
+   bool account_warning=(!available || exposure.account_no_sl>0 || exposure.account_unavailable>0);
    int gap=PS_U(compact ? 4 : 6);
    int tile_w=(rect.w-gap)/2;
    PSRect chart_rect;
    PS_UISetRect(chart_rect,rect.x,rect.y,tile_w,rect.h);
    PSRect account_rect;
    PS_UISetRect(account_rect,rect.x+tile_w+gap,rect.y,rect.w-tile_w-gap,rect.h);
-   PS_UIExposureTile(chart_rect,"Current chart",available,exposure.chart_loss_percent,
-                     exposure.chart_loss_money,compact,false,market);
-   PS_UIExposureTile(account_rect,"Whole account",available,exposure.account_loss_percent,
-                     exposure.account_loss_money,compact,warning,market);
+   PS_UIExposureTile(chart_rect,"Current chart",available,percent_available,exposure.chart_loss_percent,
+                     exposure.chart_loss_money,compact,chart_warning,market);
+   PS_UIExposureTile(account_rect,"Whole account",available,percent_available,exposure.account_loss_percent,
+                     exposure.account_loss_money,compact,account_warning,market);
   }
 
 void PS_UIExposurePlace(PSUIState &ui)
@@ -1700,7 +1856,17 @@ void PS_UIExposurePlace(PSUIState &ui)
       x=PS_ClampInt(ui.panel_x+PS_U(24),0,MathMax(0,ui.chart_w-w));
       y=PS_ClampInt(ui.panel_y+PS_U(24),0,MathMax(0,ui.chart_h-h));
      }
-   PS_UISetRect(g_exposure_ui.sidecar_rect,x,y,MathMin(w,ui.chart_w),MathMin(h,ui.chart_h));
+   w=MathMin(w,ui.chart_w);
+   h=MathMin(h,ui.chart_h);
+   x=PS_ClampInt(x,0,MathMax(0,ui.chart_w-w));
+   y=PS_ClampInt(y,0,MathMax(0,ui.chart_h-h));
+   PS_UISetRect(g_exposure_ui.sidecar_rect,x,y,w,h);
+  }
+
+int PS_UIExposurePageCapacity()
+  {
+   int room=g_exposure_ui.sidecar_rect.h-PS_U(128)-PS_U(28);
+   return(PS_ClampInt(room/MathMax(1,PS_U(28)),0,PS_EXPOSURE_VISIBLE_ROWS));
   }
 
 void PS_UIExposureText(const int x,const int y,const string value,const int size,
@@ -1741,21 +1907,41 @@ string PS_UIExposureProjectedMoney(const PSExposureItem &item,const PSMarketSnap
    return(PS_FormatMoneyDisplay(item.projected_result,market));
   }
 
-void PS_UIExposureSidecarRender(PSUIState &ui,const PSExposureSnapshot &exposure,
+void PS_UIExposureHide()
+  {
+   if(g_ps_exposure_canvas_created)
+      ObjectSetInteger(ChartID(),g_ps_exposure_canvas_name,OBJPROP_TIMEFRAMES,OBJ_NO_PERIODS);
+   PS_UIResetRect(g_exposure_ui.sidecar_rect);
+   PS_UIResetRect(g_exposure_ui.close_rect);
+   PS_UIResetRect(g_exposure_ui.scope_chart_rect);
+   PS_UIResetRect(g_exposure_ui.scope_account_rect);
+   PS_UIResetRect(g_exposure_ui.labels_toggle_rect);
+   PS_UIResetRect(g_exposure_ui.scroll_up_rect);
+   PS_UIResetRect(g_exposure_ui.scroll_down_rect);
+   for(int i=0;i<PS_EXPOSURE_VISIBLE_ROWS;i++) PS_UIResetRect(g_exposure_ui.row_rects[i]);
+  }
+
+bool PS_UIExposureSidecarRender(PSUIState &ui,const PSExposureSnapshot &exposure,
                                 const PSMarketSnapshot &market)
   {
    for(int i=0;i<PS_EXPOSURE_VISIBLE_ROWS;i++) PS_UIResetRect(g_exposure_ui.row_rects[i]);
    if(!g_exposure_ui.details_open)
      {
-      if(g_ps_exposure_canvas_created)
-         ObjectSetInteger(ChartID(),g_ps_exposure_canvas_name,OBJPROP_TIMEFRAMES,OBJ_NO_PERIODS);
-      PS_UIResetRect(g_exposure_ui.sidecar_rect);
-      return;
+      PS_UIExposureHide();
+      g_ps_exposure_retry_after_ms=0;
+      return(true);
      }
+   if(GetTickCount64()<g_ps_exposure_retry_after_ms) return(false);
 
    PS_UIExposurePlace(ui);
    PSRect absolute=g_exposure_ui.sidecar_rect;
-   if(!PS_UIExposureCanvasEnsure(ui,absolute)) return;
+   if(!PS_UIExposureCanvasEnsure(ui,absolute))
+     {
+      PS_UIExposureHide();
+      g_ps_exposure_retry_after_ms=GetTickCount64()+1000;
+      return(false);
+     }
+   g_ps_exposure_retry_after_ms=0;
    int w=absolute.w;
    int h=absolute.h;
    g_ps_exposure_canvas.Erase(PS_PremiumColor(PS_ThemePanel()));
@@ -1785,9 +1971,14 @@ void PS_UIExposureSidecarRender(PSUIState &ui,const PSExposureSnapshot &exposure
    int protected_count=(chart_scope ? exposure.chart_protected : exposure.account_protected);
    int no_sl=(chart_scope ? exposure.chart_no_sl : exposure.account_no_sl);
    int unavailable=(chart_scope ? exposure.chart_unavailable : exposure.account_unavailable);
-   string percent_text=(exposure.equity_basis>0.0 ? DoubleToString(percent,2)+"%" : "—%");
+   bool incomplete=(no_sl+unavailable>0);
+   string percent_text=(!exposure.enumeration_valid ? "Unavailable" :
+                        (incomplete ? "Incomplete" : (exposure.equity_basis>0.0 ? DoubleToString(percent,2)+"%" : "—%")));
    PS_UIExposureText(PS_U(12),PS_U(76),percent_text,16,PS_ThemeLoss(),TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
-   PS_UIExposureText(w-PS_U(12),PS_U(76),PS_FormatMoneyDisplay(money,market),14,PS_ThemeLoss(),TA_RIGHT|TA_VCENTER,"Segoe UI Semibold");
+   string money_text=(exposure.enumeration_valid ? (incomplete ? "Known " : "")+PS_FormatMoneyDisplay(money,market) : "—");
+   int total_size=14;
+   money_text=PS_UIFitText(g_ps_exposure_canvas,money_text,w/2-PS_U(16),total_size);
+   PS_UIExposureText(w-PS_U(12),PS_U(76),money_text,total_size,PS_ThemeLoss(),TA_RIGHT|TA_VCENTER,"Segoe UI Semibold");
    string coverage=IntegerToString(protected_count)+" protected";
    if(no_sl>0) coverage+=" · "+IntegerToString(no_sl)+" without SL";
    if(unavailable>0) coverage+=" · "+IntegerToString(unavailable)+" unavailable";
@@ -1804,12 +1995,13 @@ void PS_UIExposureSidecarRender(PSUIState &ui,const PSExposureSnapshot &exposure
    PS_UIExposureText(w-PS_U(42),PS_U(113),"▲",8,PS_ThemeMuted(),TA_CENTER|TA_VCENTER);
    PS_UIExposureText(w-PS_U(18),PS_U(113),"▼",8,PS_ThemeMuted(),TA_CENTER|TA_VCENTER);
 
-   int filtered_count=PS_UIExposureFilteredCount(exposure);
-   int max_scroll=MathMax(0,filtered_count-PS_EXPOSURE_VISIBLE_ROWS);
+   int filtered_count=(exposure.enumeration_valid ? PS_UIExposureFilteredCount(exposure) : 0);
+   int page_capacity=PS_UIExposurePageCapacity();
+   int max_scroll=MathMax(0,filtered_count-page_capacity);
    g_exposure_ui.scroll_offset=PS_ClampInt(g_exposure_ui.scroll_offset,0,max_scroll);
    int row_y=PS_U(128);
    int row_h=PS_U(28);
-   for(int row=0;row<PS_EXPOSURE_VISIBLE_ROWS;row++)
+   for(int row=0;row<page_capacity;row++)
      {
       int filtered_index=g_exposure_ui.scroll_offset+row;
       if(filtered_index>=filtered_count) break;
@@ -1826,9 +2018,9 @@ void PS_UIExposureSidecarRender(PSUIState &ui,const PSExposureSnapshot &exposure
       string kind=(item.kind==PS_EXPOSURE_PENDING ? "Pending " : "");
       string direction=(item.direction==PS_DIRECTION_LONG ? "Buy " : "Sell ");
       string symbol_text=(StringLen(item.symbol)>12 ? StringSubstr(item.symbol,0,11)+"…" : item.symbol);
-      string primary=symbol_text+"  "+kind+direction+DoubleToString(item.volume,2);
+      string primary=symbol_text+"  "+kind+direction+DoubleToString(item.volume,item.volume_digits);
       string ticket=StringFormat("#%04d",(int)(item.ticket%10000));
-      string secondary=(PS_IsPositiveFinite(item.stop_loss) ? "SL "+DoubleToString(item.stop_loss,4) : "SL —")+" · "+ticket;
+      string secondary=(PS_IsPositiveFinite(item.stop_loss) ? "SL "+DoubleToString(item.stop_loss,item.price_digits) : "SL —")+" · "+ticket;
       color result_color=(item.status==PS_EXPOSURE_VALID
                           ? (item.projected_result>0.0 ? PS_ThemeProfit() : PS_ThemeLoss())
                           : PS_ThemeIncomplete());
@@ -1837,16 +2029,28 @@ void PS_UIExposureSidecarRender(PSUIState &ui,const PSExposureSnapshot &exposure
                              ? (item.projected_result>0.0 ? "+" : "−")+
                                DoubleToString(MathAbs(item.projected_result)/exposure.equity_basis*100.0,2)+"%"
                              : "—");
-      PS_UIExposureText(PS_U(12),top+PS_U(9),primary,8,PS_ThemeText(),TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
-      PS_UIExposureText(PS_U(12),top+PS_U(21),secondary,7,PS_ThemeMuted());
-      PS_UIExposureText(w-PS_U(12),top+PS_U(9),result,8,result_color,TA_RIGHT|TA_VCENTER,"Segoe UI Semibold");
+      int result_size=8;
+      result=PS_UIFitText(g_ps_exposure_canvas,result,2*w/5-PS_U(12),result_size);
+      int result_w=g_ps_exposure_canvas.TextWidth(result);
+      int left_w=MathMax(0,w-PS_U(32)-result_w);
+      int primary_size=8;
+      int secondary_size=7;
+      primary=PS_UIFitText(g_ps_exposure_canvas,primary,left_w,primary_size);
+      secondary=PS_UIFitText(g_ps_exposure_canvas,secondary,left_w,secondary_size,"Segoe UI");
+      PS_UIExposureText(PS_U(12),top+PS_U(9),primary,primary_size,PS_ThemeText(),TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
+      PS_UIExposureText(PS_U(12),top+PS_U(21),secondary,secondary_size,PS_ThemeMuted());
+      PS_UIExposureText(w-PS_U(12),top+PS_U(9),result,result_size,result_color,TA_RIGHT|TA_VCENTER,"Segoe UI Semibold");
       PS_UIExposureText(w-PS_U(12),top+PS_U(21),result_percent,7,result_color,TA_RIGHT|TA_VCENTER);
      }
 
-   PS_UIExposureText(PS_U(10),h-PS_U(12),
-                     "Gross at SL · future swap, slippage and unknown fees excluded.",7,
+   int footer_size=7;
+   string footer=PS_UIFitText(g_ps_exposure_canvas,
+                             "Gross at SL · future swap, slippage and unknown fees excluded.",
+                             w-PS_U(20),footer_size,"Segoe UI");
+   PS_UIExposureText(PS_U(10),h-PS_U(12),footer,footer_size,
                      PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
    g_ps_exposure_canvas.Update(false);
+   return(true);
   }
 
 PSExposureHit PS_UIExposureHitTest(const int x,const int y,int &row_index)
@@ -1879,6 +2083,17 @@ bool PS_UIHorizontalLaneIntersects(const int x,const int w,const PSRect &rect)
    return(rect.w>0 && x<rect.x+rect.w && x+w>rect.x);
   }
 
+bool PS_UIExposureLaneBlocked(const int x,const int w,const PSRect &panel)
+  {
+   if(PS_UIHorizontalLaneIntersects(x,w,panel) ||
+      (g_exposure_ui.details_open &&
+       PS_UIHorizontalLaneIntersects(x,w,g_exposure_ui.sidecar_rect))) return(true);
+   for(int i=0;i<3;i++)
+      if(g_ps_handle_visible[i] &&
+         PS_UIHorizontalLaneIntersects(x,w,g_ps_handle_rects[i])) return(true);
+   return(false);
+  }
+
 void PS_UIExposureLabelText(CCanvas &canvas,const int x,const int y,const string value,const int size,
                             const color clr,const uint alignment=TA_LEFT|TA_VCENTER,
                             const string font="Segoe UI")
@@ -1891,7 +2106,7 @@ void PS_UIExposureLabelsRender(PSUIState &ui,const PSExposureSnapshot &exposure,
                                const PSMarketSnapshot &market)
   {
    g_ps_exposure_label_count=0;
-   if(!g_exposure_ui.chart_labels_visible || ui.chart_w<PS_U(110) || ui.chart_h<PS_U(40))
+   if(!exposure.enumeration_valid || !g_exposure_ui.chart_labels_visible || ui.chart_w<PS_U(110) || ui.chart_h<PS_U(40))
      {
       PS_UIExposureLabelsHideFrom(0);
       return;
@@ -1937,28 +2152,34 @@ void PS_UIExposureLabelsRender(PSUIState &ui,const PSExposureSnapshot &exposure,
    int label_x=ui.chart_w-PS_U(190);
    PSRect panel;
    PS_UISetRect(panel,ui.panel_x,ui.panel_y,ui.panel_w,ui.panel_h);
-   bool lane_blocked=PS_UIHorizontalLaneIntersects(label_x,label_w,panel) ||
-                     (g_exposure_ui.details_open &&
-                      PS_UIHorizontalLaneIntersects(label_x,label_w,g_exposure_ui.sidecar_rect));
+   label_x=PS_ClampInt(label_x,PS_U(4),MathMax(PS_U(4),ui.chart_w-label_w-PS_U(58)));
+   bool lane_blocked=PS_UIExposureLaneBlocked(label_x,label_w,panel);
    if(lane_blocked)
      {
-      int alternatives[3];
-      alternatives[0]=ui.panel_x-label_w-PS_U(8);
-      alternatives[1]=ui.panel_x+ui.panel_w+PS_U(8);
-      alternatives[2]=PS_U(8);
-      for(int lane=0;lane<3;lane++)
+      int handles_left=ui.chart_w-PS_U(54);
+      for(int i=0;i<3;i++)
+         if(g_ps_handle_visible[i]) handles_left=MathMin(handles_left,g_ps_handle_rects[i].x);
+      int alternatives[4];
+      alternatives[0]=handles_left-label_w-PS_U(8);
+      alternatives[1]=ui.panel_x-label_w-PS_U(8);
+      alternatives[2]=ui.panel_x+ui.panel_w+PS_U(8);
+      alternatives[3]=PS_U(8);
+      for(int lane=0;lane<4;lane++)
         {
          int candidate=alternatives[lane];
          if(candidate<PS_U(4) || candidate+label_w>ui.chart_w-PS_U(58)) continue;
-         if(PS_UIHorizontalLaneIntersects(candidate,label_w,panel)) continue;
-         if(g_exposure_ui.details_open &&
-            PS_UIHorizontalLaneIntersects(candidate,label_w,g_exposure_ui.sidecar_rect)) continue;
+         if(PS_UIExposureLaneBlocked(candidate,label_w,panel)) continue;
          label_x=candidate;
          lane_blocked=false;
          break;
         }
      }
-   label_x=PS_ClampInt(label_x,PS_U(4),MathMax(PS_U(4),ui.chart_w-label_w-PS_U(58)));
+   // The details list remains available when there is no unobstructed lane.
+   if(lane_blocked)
+     {
+      PS_UIExposureLabelsHideFrom(0);
+      return;
+     }
 
    int spacing=PS_U(22);
    int min_center=PS_U(12);
@@ -2004,11 +2225,24 @@ void PS_UIExposureLabelsRender(PSUIState &ui,const PSExposureSnapshot &exposure,
       color side_color=(item.direction==PS_DIRECTION_LONG ? PS_PREMIUM_GREEN : PS_CLR_SHORT);
       PS_UIExposureLabelText(canvas,PS_U(8),rect.h/2,side,8,side_color,
                              TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
-      PS_UIExposureLabelText(canvas,PS_U(22),rect.h/2,DoubleToString(item.volume,2),8,
+      string volume_text=DoubleToString(item.volume,item.volume_digits);
+      string result_text=PS_UIExposureProjectedMoney(item,market);
+      int volume_x=PS_U(22);
+      int result_right=rect.w-PS_U(7);
+      int text_gap=PS_U(6);
+      canvas.FontSet("Segoe UI Semibold",-10*PS_Font(8));
+      int volume_reserve=MathMin(PS_U(36),canvas.TextWidth(volume_text));
+      int result_size=8;
+      result_text=PS_UIFitText(canvas,result_text,
+                              MathMax(0,result_right-volume_x-text_gap-volume_reserve),result_size);
+      int result_width=canvas.TextWidth(result_text);
+      int volume_size=8;
+      volume_text=PS_UIFitText(canvas,volume_text,
+                              MathMax(0,result_right-result_width-text_gap-volume_x),volume_size);
+      PS_UIExposureLabelText(canvas,volume_x,rect.h/2,volume_text,volume_size,
                              PS_ThemeMuted(),TA_LEFT|TA_VCENTER,"Segoe UI Semibold");
       color result_color=(item.projected_result>0.0 ? PS_ThemeProfit() : PS_ThemeLoss());
-      PS_UIExposureLabelText(canvas,rect.w-PS_U(7),rect.h/2,
-                             PS_UIExposureProjectedMoney(item,market),8,result_color,
+      PS_UIExposureLabelText(canvas,result_right,rect.h/2,result_text,result_size,result_color,
                              TA_RIGHT|TA_VCENTER,"Segoe UI Semibold");
       canvas.Update(false);
      }
@@ -2096,7 +2330,7 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
                               (model.lines_visible ? "Lines shown" : "Lines hidden"),
                               (model.lines_visible ? PS_ThemeLabelBlue() : PS_ThemeText()),17);
 
-    PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(163),5,PS_ThemeSection(),PS_ThemeBorder());
+    PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(185),5,PS_ThemeSection(),PS_ThemeBorder());
    PS_PremiumText(PS_U(16),PS_U(244),"Account",9,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
    PS_PremiumText(PS_U(63),PS_U(267),"Risk %",7,PS_ThemeMuted(),TA_CENTER|TA_VCENTER);
    PS_PremiumText(PS_U(174),PS_U(267),"Target risk",7,PS_ThemeMuted(),TA_CENTER|TA_VCENTER);
@@ -2127,7 +2361,7 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
                            PS_UIActualRiskMoneyDisplay(calc,market),
                             editor,PS_FIELD_NONE,true,false,11,10,PS_ThemeLoss());
    PS_PremiumCompactField(ui,PS_CTRL_POSITION_SIZE,
-                          PS_GroupDecimalText(PS_VolumeText(calc.volume,market)),
+                          (calc.sizing_available ? PS_GroupDecimalText(PS_VolumeText(calc.volume,market)) : "—"),
                            editor,PS_FIELD_NONE,true,false,11,12);
    PS_PremiumCompactSmallControl(ui,PS_CTRL_POSITION_COPY,"C",
                                   copy_feedback_control==PS_CTRL_POSITION_COPY,21);
@@ -2184,26 +2418,26 @@ void PS_PremiumRenderMini(PSUIState &ui,const PSModel &model,const PSCalcResult 
    PS_PremiumControlButton(ui,PS_CTRL_TRADE,trade_text,calc.valid,direction_color,18);
   }
 
-void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
+bool PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
                         const PSMarketSnapshot &market,const PSExposureSnapshot &exposure,
                         const PSEditorState &editor,
                         const PSControlId copy_feedback_control)
   {
    PS_UISelectTheme(model.theme_mode);
-   if(!PS_UIPanelCanvasEnsure(ui)) return;
+   if(!PS_UIPanelCanvasEnsure(ui)) return(false);
    if(model.view_mode==PS_VIEW_MINI)
      {
       PS_PremiumRenderMini(ui,model,calc,market,editor);
       PS_PremiumFocusRing(ui);
       g_ps_panel_canvas.Update(false);
-      return;
+      return(true);
      }
    if(model.view_mode==PS_VIEW_COMPACT)
      {
       PS_PremiumRenderCompact(ui,model,calc,market,exposure,editor,copy_feedback_control);
       PS_PremiumFocusRing(ui);
       g_ps_panel_canvas.Update(false);
-      return;
+      return(true);
      }
 
    g_ps_panel_canvas.Erase(PS_PremiumColor(PS_ThemeBackground()));
@@ -2262,7 +2496,7 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
                               (model.lines_visible ? "Lines shown" : "Lines hidden"),
                               (model.lines_visible ? PS_ThemeLabelBlue() : PS_ThemeText()),17);
 
-     PS_PremiumRoundRect(PS_U(10),PS_U(249),PS_U(418),PS_U(180),5,PS_ThemeSection(),PS_ThemeBorder());
+     PS_PremiumRoundRect(PS_U(10),PS_U(249),PS_U(418),PS_U(198),5,PS_ThemeSection(),PS_ThemeBorder());
     PS_PremiumText(PS_U(20),PS_U(269),"Account",10,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
     PS_PremiumText(PS_U(74),PS_U(295),"Risk %",8,PS_ThemeMuted(),TA_CENTER|TA_VCENTER);
     PS_PremiumText(PS_U(205),PS_U(295),"Target risk",8,PS_ThemeMuted(),TA_CENTER|TA_VCENTER);
@@ -2294,7 +2528,7 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
                            PS_UIActualRiskMoneyDisplay(calc,market),
                            editor,PS_FIELD_NONE,true,false,11,10,PS_ThemeLoss());
    PS_PremiumCompactField(ui,PS_CTRL_POSITION_SIZE,
-                          PS_GroupDecimalText(PS_VolumeText(calc.volume,market)),
+                          (calc.sizing_available ? PS_GroupDecimalText(PS_VolumeText(calc.volume,market)) : "—"),
                            editor,PS_FIELD_NONE,true,false,11,13);
    PS_PremiumCompactSmallControl(ui,PS_CTRL_POSITION_COPY,"C",
                                  copy_feedback_control==PS_CTRL_POSITION_COPY,27);
@@ -2319,28 +2553,50 @@ void PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
 
    PS_PremiumFocusRing(ui);
    g_ps_panel_canvas.Update(false);
+   return(true);
   }
 
-void PS_UIRenderPanel(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
+void PS_UIHidePanelContent(const PSUIState &ui);
+
+void PS_UIInvalidatePanelHits()
+  {
+   g_ps_panel_render_ready=false;
+   for(int i=0;i<PS_CTRL_COUNT;i++) g_ps_control_visible[i]=false;
+   for(int i=0;i<3;i++) g_ps_handle_visible[i]=false;
+   g_ps_exposure_label_count=0;
+   PS_UIResetRect(g_exposure_ui.sidecar_rect);
+  }
+
+bool PS_UIRenderPanel(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
                       const PSMarketSnapshot &market,const PSExposureSnapshot &exposure,
                       const PSEditorState &editor,const PSControlId copy_feedback_control)
   {
    ulong started=GetMicrosecondCount();
    PS_UILayout(ui,model.view_mode);
-   PS_UIPremiumRender(ui,model,calc,market,exposure,editor,copy_feedback_control);
+   if(!PS_UIPremiumRender(ui,model,calc,market,exposure,editor,copy_feedback_control))
+     {
+      PS_UIInvalidatePanelHits();
+      PS_UIHidePanelContent(ui);
+      PS_UIHidePlanningLines(ui);
+      ui.dirty=true;
+      return(false);
+     }
    PS_UIUpdateLines(ui,model,market);
+   g_ps_panel_render_ready=true;
    ui.dirty=false;
    PS_PerfCheck("render-panel",started,PS_RENDER_BUDGET_US);
+   return(true);
   }
 
-void PS_UIRenderExposureDetails(PSUIState &ui,const PSModel &model,
+bool PS_UIRenderExposureDetails(PSUIState &ui,const PSModel &model,
                                 const PSExposureSnapshot &exposure,
                                 const PSMarketSnapshot &market)
   {
    ulong started=GetMicrosecondCount();
    PS_UISelectTheme(model.theme_mode);
-   PS_UIExposureSidecarRender(ui,exposure,market);
+   bool rendered=PS_UIExposureSidecarRender(ui,exposure,market);
    PS_PerfCheck("render-exposure-details",started,PS_EXPOSURE_DETAILS_BUDGET_US);
+   return(rendered);
   }
 
 void PS_UIRenderExposureLabels(PSUIState &ui,const PSModel &model,
@@ -2350,6 +2606,7 @@ void PS_UIRenderExposureLabels(PSUIState &ui,const PSModel &model,
    ulong started=GetMicrosecondCount();
    PS_UISelectTheme(model.theme_mode);
    PS_UIExposureLabelsRender(ui,exposure,market);
+   g_ps_exposure_labels_layout_dirty=false;
    PS_PerfCheck("render-exposure-labels",started,PS_EXPOSURE_LABELS_BUDGET_US);
   }
 
@@ -2357,7 +2614,7 @@ void PS_UIRender(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
                  const PSMarketSnapshot &market,const PSExposureSnapshot &exposure,
                  const PSEditorState &editor,const PSControlId copy_feedback_control)
   {
-   PS_UIRenderPanel(ui,model,calc,market,exposure,editor,copy_feedback_control);
+   if(!PS_UIRenderPanel(ui,model,calc,market,exposure,editor,copy_feedback_control)) return;
    PS_UIRenderExposureDetails(ui,model,exposure,market);
    PS_UIRenderExposureLabels(ui,model,exposure,market);
    ChartRedraw(ChartID());
@@ -2366,6 +2623,7 @@ void PS_UIRender(PSUIState &ui,const PSModel &model,const PSCalcResult &calc,
 void PS_UIRenderWaitingPanel(PSUIState &ui,const PSModel &model,const string reason)
   {
    PS_UILayout(ui,model.view_mode);
+   PS_UIInvalidatePanelHits();
    PS_UISelectTheme(model.theme_mode);
    if(!PS_UIPanelCanvasEnsure(ui)) return;
    g_ps_panel_canvas.Erase(PS_PremiumColor(PS_ThemeBackground()));

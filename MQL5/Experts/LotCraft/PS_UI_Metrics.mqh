@@ -41,7 +41,7 @@ void PS_UIMetricsRefresh(const int chart_w,const int chart_h,const PSViewMode mo
    if(dpi<=0) dpi=96;
    g_ps_metrics.dpi_scale=MathMax(1.0,MathMin(2.0,(double)dpi/96.0));
    int base_w=(mode==PS_VIEW_FULL ? 438 : (mode==PS_VIEW_COMPACT ? 372 : 360));
-   int base_h=(mode==PS_VIEW_FULL ? 529 : (mode==PS_VIEW_COMPACT ? 470 : 92));
+   int base_h=(mode==PS_VIEW_FULL ? 547 : (mode==PS_VIEW_COMPACT ? 492 : 92));
    double fit_w=(double)MathMax(1,chart_w-8)/(double)base_w;
    double fit_h=(double)MathMax(1,chart_h-8)/(double)base_h;
    g_ps_metrics.fit_scale=MathMin(fit_w,fit_h);
@@ -54,9 +54,9 @@ void PS_UIMetricsRefresh(const int chart_w,const int chart_h,const PSViewMode mo
    g_ps_metrics.radius_section=PS_U(5);
    g_ps_metrics.radius_control=PS_U(4);
    g_ps_metrics.full_w=PS_U(438);
-   g_ps_metrics.full_h=PS_U(529);
+   g_ps_metrics.full_h=PS_U(547);
    g_ps_metrics.compact_w=PS_U(372);
-   g_ps_metrics.compact_h=PS_U(470);
+   g_ps_metrics.compact_h=PS_U(492);
    g_ps_metrics.mini_w=PS_U(360);
    g_ps_metrics.mini_h=PS_U(92);
   }

@@ -232,31 +232,33 @@ def build_fresh_symbol_plan(
     stop = outward_price(reference, gap, -1 if model.direction is Direction.LONG else 1, market)
     if model.order_mode is OrderMode.INSTANT:
         entry = reference
-    elif market.allow_limit:
-        entry = _limit_entry(reference, stop, model.direction, market)
-    elif market.allow_stop:
-        entry = _stop_entry(reference, stop, model.direction, market)
     else:
-        raise ValueError("pending subtype unsupported")
+        entry = None
+        if market.allow_limit:
+            try:
+                entry = _limit_entry(reference, stop, model.direction, market)
+            except ValueError:
+                pass
+        if entry is None and market.allow_stop:
+            entry = _stop_entry(reference, stop, model.direction, market)
+        if entry is None:
+            entry = outward_price(reference, pending_leg_gap(market),
+                                  -1 if model.direction is Direction.LONG else 1, market)
     take = 0.0
     if model.take_profit > 0:
         take = outward_price(entry, gap, 1 if model.direction is Direction.LONG else -1, market)
-    candidate = replace(model, entry=entry, stop_loss=stop, take_profit=take, revision=model.revision + 1)
-    order_type, effective_entry = resolve_order(candidate, market)
-    _validate_prices(candidate, market, effective_entry)
-    if model.order_mode is OrderMode.PENDING and order_type not in {
-        OrderType.BUY_LIMIT,
-        OrderType.SELL_LIMIT,
-        OrderType.BUY_STOP,
-        OrderType.SELL_STOP,
-    }:
-        raise AssertionError("fresh pending plan did not resolve as pending")
-    return candidate
+    # A planning candidate need not be executable. calculate() remains the
+    # authority for unsupported subtypes and protective-price failures.
+    return replace(model, entry=entry, stop_loss=stop, take_profit=take, revision=model.revision + 1)
 
 
 def change_order_mode(model: Model, market: Market, new_mode: OrderMode) -> Model:
     if model.order_mode is new_mode:
         return model
+    if new_mode not in (OrderMode.INSTANT, OrderMode.PENDING):
+        raise ValueError("order mode invalid")
+    if not all(is_positive_finite(v) for v in (market.ask, market.bid, market.tick_size)):
+        raise ValueError("quote invalid")
     reference = normalize_price(market.ask if model.direction is Direction.LONG else market.bid, market)
     if new_mode is OrderMode.PENDING:
         if market.allow_limit:
@@ -270,35 +272,9 @@ def change_order_mode(model: Model, market: Market, new_mode: OrderMode) -> Mode
             entry = _stop_entry(reference, model.stop_loss, model.direction, market)
         else:
             raise ValueError("pending subtype unsupported")
-        take = model.take_profit
-        minimum = market.protective_distance + market.tick_size
-        take_valid = take <= 0 or (
-            take - entry >= minimum if model.direction is Direction.LONG else entry - take >= minimum
-        )
-        if not take_valid:
-            distance = max(abs(model.take_profit - model.entry), minimum)
-            take = outward_price(entry, distance, 1 if model.direction is Direction.LONG else -1, market)
-        candidate = replace(
-            model,
-            order_mode=OrderMode.PENDING,
-            entry=entry,
-            stop_loss=model.stop_loss,
-            take_profit=take,
-            revision=model.revision + 1,
-        )
     else:
-        delta = reference - model.entry
-        candidate = replace(
-            model,
-            order_mode=OrderMode.INSTANT,
-            entry=reference,
-            stop_loss=normalize_price(model.stop_loss + delta, market),
-            take_profit=normalize_price(model.take_profit + delta, market) if model.take_profit > 0 else 0.0,
-            revision=model.revision + 1,
-        )
-    _, effective_entry = resolve_order(candidate, market)
-    _validate_prices(candidate, market, effective_entry)
-    return candidate
+        entry = reference
+    return replace(model, order_mode=new_mode, entry=entry, revision=model.revision + 1)
 
 
 def floor_volume(requested: float, minimum: float, maximum: float, step: float) -> float:
@@ -342,19 +318,27 @@ def resolve_order(model: Model, market: Market) -> tuple[OrderType, float]:
         if entry < market.ask - tolerance:
             if market.ask - entry + 1e-12 < minimum:
                 raise ValueError("buy limit inside broker distance")
+            if not market.allow_limit:
+                raise ValueError("buy limit unsupported")
             return OrderType.BUY_LIMIT, entry
         if entry > market.ask + tolerance:
             if entry - market.ask + 1e-12 < minimum:
                 raise ValueError("buy stop inside broker distance")
+            if not market.allow_stop:
+                raise ValueError("buy stop unsupported")
             return OrderType.BUY_STOP, entry
         raise ValueError("long pending ambiguous")
     if entry > market.bid + tolerance:
         if entry - market.bid + 1e-12 < minimum:
             raise ValueError("sell limit inside broker distance")
+        if not market.allow_limit:
+            raise ValueError("sell limit unsupported")
         return OrderType.SELL_LIMIT, entry
     if entry < market.bid - tolerance:
         if market.bid - entry + 1e-12 < minimum:
             raise ValueError("sell stop inside broker distance")
+        if not market.allow_stop:
+            raise ValueError("sell stop unsupported")
         return OrderType.SELL_STOP, entry
     raise ValueError("short pending ambiguous")
 

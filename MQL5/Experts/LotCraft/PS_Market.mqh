@@ -3,6 +3,26 @@
 
 #include "PS_Logging.mqh"
 
+bool PS_MarketSessionBounds(const datetime from,const datetime to,long &start,long &duration)
+  {
+   start=0;
+   duration=0;
+   if(from<0 || to<0) return(false);
+   // The API's date component is not part of a trading-session time.
+   start=(long)from%86400;
+   long end=(long)to%86400;
+   duration=end-start;
+   if(duration<0) duration+=86400;
+   if(duration==0)
+     {
+      // Preserve explicitly encoded full days, but identical endpoints alone
+      // cannot prove either a full day or a closure.
+      if(from==to) return(false);
+      duration=86400;
+     }
+   return(true);
+  }
+
 bool PS_MarketSessionState(const string symbol,const datetime server_time,bool &known)
   {
    known=false;
@@ -10,32 +30,45 @@ bool PS_MarketSessionState(const string symbol,const datetime server_time,bool &
    if(!TimeToStruct(server_time,parts)) return(false);
 
    int now_seconds=parts.hour*3600+parts.min*60+parts.sec;
-   ENUM_DAY_OF_WEEK day=(ENUM_DAY_OF_WEEK)parts.day_of_week;
-
-   for(uint index=0; index<32; index++)
+   bool uncertain=false;
+   // Session end can include the next day (for example 23:00 to 25:00).
+   // Evaluate today's sessions and yesterday's continuation on one timeline.
+   for(int offset=0;offset<=1;offset++)
      {
-      datetime from=0;
-      datetime to=0;
-      ResetLastError();
-      if(!SymbolInfoSessionTrade(symbol,day,index,from,to))
+      ENUM_DAY_OF_WEEK day=(ENUM_DAY_OF_WEEK)((parts.day_of_week+7-offset)%7);
+      long elapsed=(long)now_seconds+(long)offset*86400;
+      for(uint index=0;index<32;index++)
         {
-         if(index==0) known=false;
-         break;
-        }
-
-      known=true;
-      int from_seconds=(int)from;
-      int to_seconds=(int)to;
-      if(from_seconds==to_seconds) return(true);
-      if(from_seconds<to_seconds)
-        {
-         if(now_seconds>=from_seconds && now_seconds<to_seconds) return(true);
-        }
-      else
-        {
-         if(now_seconds>=from_seconds || now_seconds<to_seconds) return(true);
+         datetime from=0;
+         datetime to=0;
+         ResetLastError();
+         if(!SymbolInfoSessionTrade(symbol,day,index,from,to)) break;
+         long start=0,duration=0;
+         if(!PS_MarketSessionBounds(from,to,start,duration))
+           {
+            uncertain=true;
+            continue;
+           }
+         known=true;
+         if(elapsed>=start && elapsed<start+duration) return(true);
         }
      }
+   // No session today is a known closure when the symbol has a weekly schedule.
+   // A completely missing schedule remains unknown; other trade checks still run.
+   if(!known)
+      for(int day=0;day<7;day++)
+        {
+         datetime from=0;
+         datetime to=0;
+         long start=0,duration=0;
+         if(SymbolInfoSessionTrade(symbol,(ENUM_DAY_OF_WEEK)day,0,from,to) &&
+            PS_MarketSessionBounds(from,to,start,duration))
+           {
+            known=true;
+            break;
+           }
+        }
+   if(uncertain) known=false;
    return(false);
   }
 
@@ -55,31 +88,68 @@ void PS_MarketCalculateDirectionalExposure(PSMarketSnapshot &market)
    market.exposure_long=0.0;
    market.exposure_short=0.0;
    market.current_symbol_positions=0;
+   double exposure_long=0.0;
+   double exposure_short=0.0;
+   int symbol_positions=0;
 
    int positions=PositionsTotal();
    for(int i=0;i<positions;i++)
      {
       ulong ticket=PositionGetTicket(i);
-      if(ticket==0) continue;
+      if(ticket==0)
+        {
+         market.symbol_ready=false;
+         market.error="Position enumeration is incomplete. Trading is paused until exposure can be verified.";
+         return;
+        }
       if(PositionGetString(POSITION_SYMBOL)!=market.symbol) continue;
-      market.current_symbol_positions++;
       double volume=PositionGetDouble(POSITION_VOLUME);
       ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      if(type==POSITION_TYPE_BUY) market.exposure_long+=volume;
-      else if(type==POSITION_TYPE_SELL) market.exposure_short+=volume;
+      if(!PS_IsPositiveFinite(volume) || (type!=POSITION_TYPE_BUY && type!=POSITION_TYPE_SELL))
+        {
+         market.symbol_ready=false;
+         market.error="Position exposure data is invalid. Trading is paused until exposure can be verified.";
+         return;
+        }
+      symbol_positions++;
+      if(type==POSITION_TYPE_BUY) exposure_long+=volume;
+      else exposure_short+=volume;
      }
 
    int orders=OrdersTotal();
    for(int i=0;i<orders;i++)
      {
       ulong ticket=OrderGetTicket(i);
-      if(ticket==0) continue;
+      if(ticket==0)
+        {
+         market.symbol_ready=false;
+         market.error="Order enumeration is incomplete. Trading is paused until exposure can be verified.";
+         return;
+        }
       if(OrderGetString(ORDER_SYMBOL)!=market.symbol) continue;
       ENUM_ORDER_TYPE type=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      if(!PS_IsBuyOrderType(type) && !PS_IsSellOrderType(type)) continue;
       double volume=OrderGetDouble(ORDER_VOLUME_CURRENT);
-      if(PS_IsBuyOrderType(type)) market.exposure_long+=volume;
-      else if(PS_IsSellOrderType(type)) market.exposure_short+=volume;
+      if(!PS_IsPositiveFinite(volume))
+        {
+         market.symbol_ready=false;
+         market.error="Order exposure data is invalid. Trading is paused until exposure can be verified.";
+         return;
+        }
+      if(PS_IsBuyOrderType(type)) exposure_long+=volume;
+      else exposure_short+=volume;
      }
+   if(positions!=PositionsTotal() || orders!=OrdersTotal() ||
+      !PS_IsFinite(exposure_long) || !PS_IsFinite(exposure_short))
+     {
+      market.symbol_ready=false;
+      market.error="Exposure changed or overflowed during enumeration. Trading is paused until exposure can be verified.";
+      return;
+     }
+   // Never publish partial totals: the netting guard and directional cap use this snapshot.
+   market.exposure_long=exposure_long;
+   market.exposure_short=exposure_short;
+   market.current_symbol_positions=symbol_positions;
   }
 
 bool PS_MarketAcquire(PSMarketSnapshot &market)

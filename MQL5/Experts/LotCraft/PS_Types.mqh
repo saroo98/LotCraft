@@ -2,13 +2,13 @@
 #define __LOTCRAFT_PS_TYPES_MQH__
 
 #define PS_PRODUCT_NAME              "LotCraft"
-#define PS_VERSION_TEXT              "1.2.0"
+#define PS_VERSION_TEXT              "1.2.1"
 #define PS_SOURCE_NAME               "LotCraft.mq5"
 #define PS_BINARY_NAME               "LotCraft.ex5"
 #define PS_LOG_PREFIX                "LotCraft"
 #define PS_OBJECT_NAMESPACE          "LotCraft.v100"
 #define PS_STATE_NAMESPACE           "LotCraft.100"
-#define PS_REQUEST_COMMENT           "LotCraft 1.2.0"
+#define PS_REQUEST_COMMENT           "LotCraft 1.2.1"
 
 #define PS_DIAGNOSTICS               0
 #define PS_POINTER_BUDGET_US         2000
@@ -247,6 +247,8 @@ struct PSExposureItem
    string symbol;
    PSDirection direction;
    double volume;
+   int price_digits;
+   int volume_digits;
    double entry;
    double stop_loss;
    double projected_result;
@@ -257,6 +259,7 @@ struct PSExposureItem
 struct PSExposureSnapshot
   {
    PSExposureItem items[];
+   bool enumeration_valid;
    double equity_basis;
    double chart_loss_money;
    double account_loss_money;
@@ -315,6 +318,7 @@ struct PSModel
 struct PSCalcResult
   {
    bool valid;
+   bool sizing_available;
    PSCalcIssue issue;
    bool quote_valid;
    bool tp_enabled;
@@ -447,6 +451,7 @@ struct PSSlTarget
 void PS_ExposureReset(PSExposureSnapshot &snapshot)
   {
    ArrayResize(snapshot.items,0);
+   snapshot.enumeration_valid=false;
    snapshot.equity_basis=0.0;
    snapshot.chart_loss_money=0.0;
    snapshot.account_loss_money=0.0;
@@ -472,10 +477,14 @@ void PS_ExposureUIReset(PSExposureUIState &state)
    state.hovered_row=-1;
   }
 
-void PS_CopyExposureSnapshot(PSExposureSnapshot &destination,const PSExposureSnapshot &source)
+bool PS_CopyExposureSnapshot(PSExposureSnapshot &destination,const PSExposureSnapshot &source)
   {
    int count=ArraySize(source.items);
-   ArrayResize(destination.items,count);
+   if(ArrayResize(destination.items,count)!=count)
+     {
+      PS_ExposureReset(destination);
+      return(false);
+     }
    for(int i=0;i<count;i++)
      {
       destination.items[i].kind=source.items[i].kind;
@@ -484,12 +493,15 @@ void PS_CopyExposureSnapshot(PSExposureSnapshot &destination,const PSExposureSna
       destination.items[i].symbol=source.items[i].symbol;
       destination.items[i].direction=source.items[i].direction;
       destination.items[i].volume=source.items[i].volume;
+      destination.items[i].price_digits=source.items[i].price_digits;
+      destination.items[i].volume_digits=source.items[i].volume_digits;
       destination.items[i].entry=source.items[i].entry;
       destination.items[i].stop_loss=source.items[i].stop_loss;
       destination.items[i].projected_result=source.items[i].projected_result;
       destination.items[i].loss_money=source.items[i].loss_money;
       destination.items[i].loss_percent=source.items[i].loss_percent;
      }
+   destination.enumeration_valid=source.enumeration_valid;
    destination.equity_basis=source.equity_basis;
    destination.chart_loss_money=source.chart_loss_money;
    destination.account_loss_money=source.account_loss_money;
@@ -503,6 +515,7 @@ void PS_CopyExposureSnapshot(PSExposureSnapshot &destination,const PSExposureSna
    destination.account_unavailable=source.account_unavailable;
    destination.fingerprint=source.fingerprint;
    destination.calculated_at_ms=source.calculated_at_ms;
+   return(true);
   }
 
 // Explicit copies avoid compiler-version-dependent implicit copy construction for

@@ -202,11 +202,16 @@ def test_fresh_pending_plan_falls_back_to_supported_stop(direction, expected):
     assert calculate(plan, market).order_type is expected
 
 
-def test_fresh_pending_plan_rejects_unsupported_subtypes_without_mutating_source():
+def test_fresh_pending_plan_keeps_controls_available_when_subtypes_are_unsupported():
     original = Model(order_mode=OrderMode.PENDING, entry=157.517, stop_loss=157.006, revision=9)
     market = Market(allow_limit=False, allow_stop=False)
-    with pytest.raises(ValueError, match="unsupported"):
-        build_fresh_symbol_plan(original, market)
+    plan = build_fresh_symbol_plan(original, market)
+    assert plan.entry > plan.stop_loss > 0
+    assert plan.order_mode is OrderMode.PENDING
+    assert not calculate(plan, market).valid
+    instant = change_order_mode(plan, market, OrderMode.INSTANT)
+    assert instant.stop_loss == plan.stop_loss
+    assert calculate(instant, market).valid
     assert original == Model(order_mode=OrderMode.PENDING, entry=157.517, stop_loss=157.006, revision=9)
 
 
@@ -268,15 +273,27 @@ def test_failed_mode_conversion_leaves_immutable_model_and_revision_unchanged():
     assert original.revision == 22
 
 
-def test_pending_conversion_preserves_valid_tp_and_translates_invalid_tp():
+def test_pending_conversion_preserves_tp_even_when_execution_is_invalid():
     market = Market()
     valid = Model(stop_loss=1.0950, take_profit=1.1100)
     valid_pending = change_order_mode(valid, market, OrderMode.PENDING)
     assert valid_pending.take_profit == valid.take_profit
     invalid = replace(valid, take_profit=1.0960)
-    translated = change_order_mode(invalid, market, OrderMode.PENDING)
-    assert translated.take_profit > translated.entry
-    assert translated.take_profit != invalid.take_profit
+    preserved = change_order_mode(invalid, market, OrderMode.PENDING)
+    assert preserved.take_profit == invalid.take_profit
+    assert not calculate(preserved, market).valid
+
+
+@pytest.mark.parametrize("direction", [Direction.LONG, Direction.SHORT])
+def test_reference_mode_cycles_keep_protective_prices_fixed(direction):
+    market = Market()
+    stop = 1.095 if direction is Direction.LONG else 1.105
+    take = 1.11 if direction is Direction.LONG else 1.09
+    plan = Model(direction=direction, stop_loss=stop, take_profit=take)
+    for _ in range(30):
+        plan = change_order_mode(plan, market, OrderMode.PENDING)
+        plan = change_order_mode(plan, market, OrderMode.INSTANT)
+        assert plan.stop_loss == stop and plan.take_profit == take
 
 
 @pytest.mark.parametrize(

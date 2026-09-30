@@ -284,7 +284,8 @@ bool PS_TradeSlNeedsChange(const double old_sl,const double target,const double 
   }
 
 bool PS_TradeValidateTargetSL(const PSDirection direction,const double target,const bool pending,
-                              const double pending_entry,const PSMarketSnapshot &market,string &error)
+                              const double pending_entry,const PSMarketSnapshot &market,string &error,
+                              const double pending_trigger=0.0)
   {
    error="";
    if(!PS_IsPositiveFinite(target))
@@ -292,17 +293,38 @@ bool PS_TradeValidateTargetSL(const PSDirection direction,const double target,co
       error="Target stop-loss is not a positive finite price.";
       return(false);
      }
-   double minimum=PS_MarketProtectiveDistance(market,true);
+   double minimum=PS_MarketProtectiveDistance(market,!pending);
+   if(pending)
+     {
+      if(!PS_IsPositiveFinite(pending_entry))
+        {
+         error="Pending-order fill price is not a positive finite price.";
+         return(false);
+        }
+      double distance=(direction==PS_DIRECTION_LONG ? pending_entry-target : target-pending_entry);
+      if(distance+PS_DOUBLE_EPS<minimum)
+        {
+         error="Pending-order target SL is inside the Entry stop distance.";
+         return(false);
+        }
+      // A pending SL is relative to its eventual fill, not today's closing quote.
+      // Freeze eligibility instead depends on the existing order's trigger.
+      double trigger=(pending_trigger>0.0 ? pending_trigger : pending_entry);
+      double quote=(direction==PS_DIRECTION_LONG ? market.tick.ask : market.tick.bid);
+      double freeze=(double)market.freeze_level_points*market.point;
+      if(!PS_IsPositiveFinite(trigger) || !PS_IsPositiveFinite(quote) ||
+         MathAbs(trigger-quote)+PS_DOUBLE_EPS<freeze)
+        {
+         error="The pending-order trigger is inside the broker freeze distance.";
+         return(false);
+        }
+      return(true);
+     }
    if(direction==PS_DIRECTION_LONG)
      {
       if(target>market.tick.bid-minimum+PS_DOUBLE_EPS)
         {
          error="Long target SL is inside the current Bid stop/freeze distance.";
-         return(false);
-        }
-      if(pending && target>pending_entry-minimum+PS_DOUBLE_EPS)
-        {
-         error="Long pending-order target SL is inside the Entry stop/freeze distance.";
          return(false);
         }
      }
@@ -313,25 +335,24 @@ bool PS_TradeValidateTargetSL(const PSDirection direction,const double target,co
          error="Short target SL is inside the current Ask stop/freeze distance.";
          return(false);
         }
-      if(pending && target<pending_entry+minimum-PS_DOUBLE_EPS)
-        {
-         error="Short pending-order target SL is inside the Entry stop/freeze distance.";
-         return(false);
-        }
      }
    return(true);
   }
 
 int PS_TradeCollectSlTargets(const PSModel &model,const PSMarketSnapshot &market,PSSlTarget &targets[])
   {
-   ArrayResize(targets,0);
+   if(ArrayResize(targets,0)!=0) return(-1);
    double target=PS_NormalizePrice(model.stop_loss,market);
 
    int positions=PositionsTotal();
    for(int i=0;i<positions;i++)
      {
       ulong ticket=PositionGetTicket(i);
-      if(ticket==0) continue;
+      if(ticket==0)
+        {
+         ArrayResize(targets,0);
+         return(-1);
+        }
       string symbol=PositionGetString(POSITION_SYMBOL);
       if(symbol!=market.symbol) continue;
       ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
@@ -342,7 +363,11 @@ int PS_TradeCollectSlTargets(const PSModel &model,const PSMarketSnapshot &market
       if(!PS_TradeValidateTargetSL(direction,target,false,0.0,market,error)) continue;
 
       int index=ArraySize(targets);
-      ArrayResize(targets,index+1);
+      if(ArrayResize(targets,index+1)!=index+1)
+        {
+         ArrayResize(targets,0);
+         return(-1);
+        }
       ZeroMemory(targets[index]);
       targets[index].is_position=true;
       targets[index].ticket=ticket;
@@ -358,21 +383,31 @@ int PS_TradeCollectSlTargets(const PSModel &model,const PSMarketSnapshot &market
    for(int i=0;i<orders;i++)
      {
       ulong ticket=OrderGetTicket(i);
-      if(ticket==0) continue;
+      if(ticket==0)
+        {
+         ArrayResize(targets,0);
+         return(-1);
+        }
       string symbol=OrderGetString(ORDER_SYMBOL);
       if(symbol!=market.symbol) continue;
       ENUM_ORDER_TYPE type=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
       if(!PS_IsBuyOrderType(type) && !PS_IsSellOrderType(type)) continue;
       if(type==ORDER_TYPE_BUY || type==ORDER_TYPE_SELL) continue;
       PSDirection direction=(PS_IsBuyOrderType(type) ? PS_DIRECTION_LONG : PS_DIRECTION_SHORT);
-      double entry=OrderGetDouble(ORDER_PRICE_OPEN);
+      double trigger=OrderGetDouble(ORDER_PRICE_OPEN);
+      bool stop_limit=(type==ORDER_TYPE_BUY_STOP_LIMIT || type==ORDER_TYPE_SELL_STOP_LIMIT);
+      double entry=(stop_limit ? OrderGetDouble(ORDER_PRICE_STOPLIMIT) : trigger);
       double old_sl=OrderGetDouble(ORDER_SL);
       if(!PS_TradeSlNeedsChange(old_sl,target,market.tick_size)) continue;
       string error="";
-      if(!PS_TradeValidateTargetSL(direction,target,true,entry,market,error)) continue;
+      if(!PS_TradeValidateTargetSL(direction,target,true,entry,market,error,trigger)) continue;
 
       int index=ArraySize(targets);
-      ArrayResize(targets,index+1);
+      if(ArrayResize(targets,index+1)!=index+1)
+        {
+         ArrayResize(targets,0);
+         return(-1);
+        }
       ZeroMemory(targets[index]);
       targets[index].is_position=false;
       targets[index].ticket=ticket;
@@ -382,12 +417,17 @@ int PS_TradeCollectSlTargets(const PSModel &model,const PSMarketSnapshot &market
       targets[index].old_sl=old_sl;
       targets[index].tp=OrderGetDouble(ORDER_TP);
       targets[index].target_sl=target;
-      targets[index].price=entry;
+      targets[index].price=trigger;
       targets[index].stoplimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
       targets[index].expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
       targets[index].order_type=type;
       targets[index].type_time=(ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
       targets[index].type_filling=(ENUM_ORDER_TYPE_FILLING)OrderGetInteger(ORDER_TYPE_FILLING);
+     }
+   if(positions!=PositionsTotal() || orders!=OrdersTotal())
+     {
+      ArrayResize(targets,0);
+      return(-1);
      }
    return(ArraySize(targets));
   }
@@ -410,11 +450,16 @@ bool PS_TradeSlTargetSetsEqual(const PSSlTarget &a[],const PSSlTarget &b[],const
    return(true);
   }
 
-void PS_TradeCopySlTargets(PSSlTarget &destination[],const PSSlTarget &source[])
+bool PS_TradeCopySlTargets(PSSlTarget &destination[],const PSSlTarget &source[])
   {
    int count=ArraySize(source);
-   ArrayResize(destination,count);
+   if(ArrayResize(destination,count)!=count)
+     {
+      ArrayResize(destination,0);
+      return(false);
+     }
    for(int i=0;i<count;i++) PS_CopySlTarget(destination[i],source[i]);
+   return(true);
   }
 
 string PS_TradeSlConfirmationText(const PSModel &model,const PSMarketSnapshot &market,const PSSlTarget &targets[])
@@ -540,9 +585,12 @@ void PS_TradeExecuteSlBatch(PSSlTarget &targets[],int &succeeded,int &failed,str
         }
 
       double live_old_sl=(targets[i].is_position ? PositionGetDouble(POSITION_SL) : OrderGetDouble(ORDER_SL));
-      double live_entry=(targets[i].is_position ? PositionGetDouble(POSITION_PRICE_OPEN) : OrderGetDouble(ORDER_PRICE_OPEN));
+      bool stop_limit=(request.type==ORDER_TYPE_BUY_STOP_LIMIT || request.type==ORDER_TYPE_SELL_STOP_LIMIT);
+      double live_entry=(targets[i].is_position ? PositionGetDouble(POSITION_PRICE_OPEN)
+                         : (stop_limit ? request.stoplimit : request.price));
       if(!PS_TradeSlNeedsChange(live_old_sl,targets[i].target_sl,current.tick_size) ||
-         !PS_TradeValidateTargetSL(targets[i].direction,targets[i].target_sl,!targets[i].is_position,live_entry,current,error))
+         !PS_TradeValidateTargetSL(targets[i].direction,targets[i].target_sl,!targets[i].is_position,
+                                  live_entry,current,error,request.price))
         {
          failed++;
          details+=StringFormat("#%I64u: no longer eligible: %s\n",targets[i].ticket,error);

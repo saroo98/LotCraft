@@ -76,10 +76,10 @@ bool PS_ModelStoredPlanStructurallyValid(PSModel &model,const PSMarketSnapshot &
    double entry=PS_NormalizePrice(model.entry,market);
    double stop=PS_NormalizePrice(model.stop_loss,market);
    double take=(model.take_profit>0.0 ? PS_NormalizePrice(model.take_profit,market) : 0.0);
-   double tolerance=market.tick_size*0.5;
-   bool sl_valid=(model.direction==PS_DIRECTION_LONG ? stop<entry-tolerance : stop>entry+tolerance);
-   bool tp_valid=(take<=0.0 || (model.direction==PS_DIRECTION_LONG ? take>entry+tolerance : take<entry-tolerance));
-   if(!PS_IsPositiveFinite(entry) || !PS_IsPositiveFinite(stop) || !sl_valid || !tp_valid) return(false);
+   // A saved planning level must survive even if a changed quote now puts it
+   // on the wrong side. Execution validation reports that condition separately.
+   if(!PS_IsPositiveFinite(entry) || !PS_IsPositiveFinite(stop) ||
+      !PS_IsFinite(take) || take<0.0) return(false);
    model.entry=entry;
    model.stop_loss=stop;
    model.take_profit=take;
@@ -518,38 +518,6 @@ bool PS_ModelStopEntryPreservingSl(const double reference,const double stop,cons
    return(PS_ModelPlaceOutward(reference,required,away_from_quote,market,entry));
   }
 
-bool PS_ModelPrepareTakeProfit(PSModel &candidate,const PSModel &original,
-                               const PSMarketSnapshot &market,const double minimum_distance,
-                               string &error)
-  {
-   error="";
-   if(!PS_IsPositiveFinite(original.take_profit))
-     {
-      candidate.take_profit=0.0;
-      return(true);
-     }
-   double tolerance=market.tick_size*0.5;
-   bool already_valid=(candidate.direction==PS_DIRECTION_LONG
-                       ? original.take_profit>candidate.entry+tolerance &&
-                         original.take_profit-candidate.entry+PS_DOUBLE_EPS>=minimum_distance
-                       : original.take_profit<candidate.entry-tolerance &&
-                         candidate.entry-original.take_profit+PS_DOUBLE_EPS>=minimum_distance);
-   if(already_valid)
-     {
-      candidate.take_profit=original.take_profit;
-      return(true);
-     }
-   double original_distance=MathAbs(original.take_profit-original.entry);
-   double distance=MathMax(original_distance,minimum_distance);
-   int profit_sign=(candidate.direction==PS_DIRECTION_LONG ? 1 : -1);
-   if(!PS_ModelPlaceOutward(candidate.entry,distance,profit_sign,market,candidate.take_profit))
-     {
-      error="A valid take-profit could not be placed on this symbol's price lattice.";
-      return(false);
-     }
-   return(true);
-  }
-
 bool PS_ModelBuildFreshSymbolPlan(PSModel &model,const PSMarketSnapshot &market,
                                   const double visible_min,const double visible_max,
                                   const int chart_height,string &error)
@@ -595,8 +563,14 @@ bool PS_ModelBuildFreshSymbolPlan(PSModel &model,const PSMarketSnapshot &market,
                                               candidate.direction,market,candidate.entry);
       if(!placed)
         {
-         error="The broker does not allow a pending subtype that can satisfy the required Entry and stop-loss distances.";
-         return(false);
+         // An unsupported pending preference must not hide the entire panel.
+         // Keep a usable plan so the user can select Instant; execution still
+         // checks the broker's allowed order types independently.
+         if(!PS_ModelPlaceOutward(reference,pending_leg,stop_sign,market,candidate.entry))
+           {
+            error="A pending planning Entry could not be placed on this symbol's price lattice.";
+            return(false);
+           }
         }
      }
 
@@ -611,7 +585,8 @@ bool PS_ModelBuildFreshSymbolPlan(PSModel &model,const PSMarketSnapshot &market,
      }
    else candidate.take_profit=0.0;
 
-   if(!PS_ModelValidateCandidate(candidate,market,error)) return(false);
+   // Planning geometry is available independently of permission to execute.
+   // PS_RiskCalculate and the submission path enforce every broker rule.
    candidate.revision=model.revision+1;
    if(PS_DIAGNOSTICS>0)
       PS_LogInfo(StringFormat("Fresh symbol plan committed for %s: direction=%d mode=%d entry=%.*f sl=%.*f tp=%.*f",
@@ -627,6 +602,11 @@ bool PS_ModelChangeOrderMode(PSModel &model,const PSMarketSnapshot &market,
   {
    error="";
    if(model.order_mode==new_mode) return(true);
+   if(new_mode!=PS_ORDER_INSTANT && new_mode!=PS_ORDER_PENDING)
+     {
+      error="The requested order mode is invalid.";
+      return(false);
+     }
     if(!PS_MarketHasUsableQuote(market) || !PS_IsPositiveFinite(market.tick_size))
      {
       error=(market.error!="" ? market.error : "A current quote is required to change order mode.");
@@ -661,21 +641,15 @@ bool PS_ModelChangeOrderMode(PSModel &model,const PSMarketSnapshot &market,
         }
       candidate.order_mode=PS_ORDER_PENDING;
       candidate.entry=pending_entry;
-      double minimum=PS_MarketProtectiveDistance(market,true)+market.tick_size;
-      if(!PS_ModelPrepareTakeProfit(candidate,model,market,minimum,error)) return(false);
      }
    else
      {
-      double old_entry=candidate.entry;
-      double delta=reference-old_entry;
       candidate.order_mode=PS_ORDER_INSTANT;
       candidate.entry=reference;
-      candidate.stop_loss=PS_NormalizePrice(candidate.stop_loss+delta,market);
-      if(PS_IsPositiveFinite(candidate.take_profit))
-         candidate.take_profit=PS_NormalizePrice(candidate.take_profit+delta,market);
      }
 
-   if(!PS_ModelValidateCandidate(candidate,market,error)) return(false);
+   // Order mode changes Entry behavior, never the chosen protective levels.
+   // Recalculation and submission still validate every price and broker rule.
    candidate.revision=model.revision+1;
    if(PS_DIAGNOSTICS>0)
       PS_LogInfo(StringFormat("Order-mode transition committed for %s: old=%d new=%d entry=%.*f sl=%.*f tp=%.*f",
@@ -700,23 +674,6 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
      {
       calc.issue=PS_CALC_ISSUE_QUOTE;
       calc.error=(market.error!="" ? market.error : "Symbol properties are not ready.");
-      PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
-      return(false);
-     }
-
-   if(!market.terminal_trade_allowed || !market.mql_trade_allowed ||
-      !market.account_trade_allowed || !market.account_expert_allowed)
-     {
-      calc.issue=PS_CALC_ISSUE_PERMISSION;
-      calc.error="Automated trading is disabled by the terminal, EA, or account permissions.";
-      PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
-      return(false);
-     }
-
-   if(market.session_known && !market.session_open)
-     {
-      calc.issue=PS_CALC_ISSUE_SESSION;
-      calc.error="The market session is closed for this symbol.";
       PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
       return(false);
      }
@@ -769,7 +726,16 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
      }
 
    string error="";
-   if(!PS_RiskResolveOrder(model,market,calc,error))
+   if(!PS_MarketHasUsableQuote(market))
+     {
+      calc.issue=PS_CALC_ISSUE_QUOTE;
+      calc.error=(market.error!="" ? market.error : "A usable quote is required for risk planning.");
+      PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
+      return(false);
+     }
+   // Closed markets can still be planned from the last usable quote. Readiness
+   // to send is evaluated separately after sizing; calc.valid is never relaxed.
+   if(!PS_RiskResolveOrder(model,market,calc,error,false))
      {
       if(calc.issue==PS_CALC_ISSUE_NONE) calc.issue=PS_CALC_ISSUE_UNKNOWN;
       calc.error=error;
@@ -878,14 +844,41 @@ bool PS_RiskCalculate(PSModel &model,const PSMarketSnapshot &market,PSCalcResult
      }
    calc.actual_percent=calc.actual_money/calc.account_basis*100.0;
    if(calc.volume_raised_to_minimum)
-      calc.notice=StringFormat("The requested risk is below the broker minimum. Size was raised to %s lots; the actual risk is shown in parentheses.",
+      calc.notice=StringFormat("The requested risk is below the broker minimum. Size was raised to %s lots; Actual SL loss shows the increased risk.",
                                DoubleToString(calc.volume,PS_DecimalsForStep(market.volume_step)));
    else if(calc.volume_capped)
       calc.notice="Position size was capped downward by broker maximum or aggregate directional volume limit.";
 
-   calc.valid=true;
+   calc.sizing_available=true;
+   if(!market.terminal_connected)
+     {
+      calc.issue=PS_CALC_ISSUE_PERMISSION;
+      calc.error="The terminal is not connected to a trade server.";
+     }
+   else if(!market.terminal_trade_allowed || !market.mql_trade_allowed ||
+           !market.account_trade_allowed || !market.account_expert_allowed)
+     {
+      calc.issue=PS_CALC_ISSUE_PERMISSION;
+      calc.error="Automated trading is disabled by the terminal, EA, or account permissions.";
+     }
+   else if(market.session_known && !market.session_open)
+     {
+      calc.issue=PS_CALC_ISSUE_SESSION;
+      calc.error="The market session is closed for this symbol.";
+     }
+   else if(!market.tick_valid)
+     {
+      calc.issue=PS_CALC_ISSUE_QUOTE;
+      calc.error=(market.error!="" ? market.error : "A current quote is required to send a trade.");
+     }
+   else if(!PS_MarketDirectionPermitted(market,model.direction,error))
+     {
+      calc.issue=PS_CALC_ISSUE_PERMISSION;
+      calc.error=error;
+     }
+   else calc.valid=true;
    PS_PerfCheck("risk",started,PS_CALC_BUDGET_US);
-   return(true);
+   return(calc.valid);
   }
 
 #endif

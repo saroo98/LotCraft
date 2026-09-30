@@ -1,9 +1,9 @@
-# LotCraft 1.2.0 Test Plan
+# LotCraft 1.2.1 Test Plan
 
 ## 1. Test policy
 
 - Use deterministic offline fixtures for domain arithmetic, editing semantics, trade-boundary behavior, source contracts, path policy, and installer binary structure.
-- Use a real Windows MT5 terminal and demo account for compiler, chart interaction, lifecycle, server-policy, and installation validation.
+- Use background MetaEditor for compilation. Chart interaction, lifecycle and server-policy acceptance require a separately authorized isolated Windows MT5/demo environment. The current audit does not launch a terminal or perform live UI verification.
 - Do not place a live-account trade.
 - Preserve compiler logs, Experts/Journal logs, screenshots or recordings for interaction cases, server retcodes, installer logs, manifests, and SHA-256 output.
 - A static or mocked test is not evidence that MT5 rendered or executed the behavior correctly.
@@ -14,12 +14,19 @@
 |---|---|---|
 | Calculation reference model | `tests/reference_model.py`, `tests/test_calculation.py` | Long/short, Instant, all pending subtypes, risk authorities, account modes, live basis changes, commission, symbol-class fixtures, currency conversion assumption boundary, min/max/limit, invalid data, stops, downward rounding |
 | Numeric editor reference | `tests/test_editor.py` | Complete/incomplete parsing, decimal point/comma, signs, invalid text, NaN/infinity-like text, selection replacement, Backspace/Delete, finite large values |
-| Trade boundary model | `tests/trade_reference.py`, `tests/test_trade_safety.py` | Permissions, confirmation cancel/reconfirm, duplicate guard, server retcodes, netting guard, zero/one/multiple SL targets, direction/symbol filtering, partial failure, TP preservation |
+| Trade boundary model | `tests/trade_reference.py`, `tests/test_trade_safety.py` | Permissions, single new-order confirmation/cancel, duplicate guard, server retcodes, netting guard, zero/one/multiple SL targets, eligibility/symbol filtering, partial failure, TP preservation |
 | Source contract | `tests/test_static_contract.py` | Identity, exact control inventory, no native extra controls, line lock/handles, editor paths, persistence allowlist, confirmation stability, request separation, explicit structure copies, ownership cleanup, pointer-loss fallback |
-| Installer policy | `installer/internal/policy/*`, `tests/test_installer_contract.py` | Windows path normalization, UNC paths, containment, deceptive prefixes, reparse resolution, atomic commit/rollback, owned-file uninstall, predelete hash validation |
+| Installer policy | `installer/internal/policy/*`, `tests/test_installer_contract.py` | Windows path normalization, UNC paths, containment, deceptive prefixes, reparse resolution, staged commit/rollback, owned-file uninstall, predelete hash validation |
 | Installer PE | `tests/test_installer_binary.py` | Windows x64 GUI PE, image version, version resource strings, zero timestamp, PE checksum |
 | Release verifier | `tests/test_release_verifier.py` | UTF-16 compiler log parsing, zero-warning requirement, staged hash equality, installed hash requirement |
 | Signed updater | `installer/internal/update/*`, `installer/cmd/setup/updater_windows_test.go`, `tests/test_updater_contract.py` | Stable semantic versions, API parsing, signature and descriptor verification, limits/timeouts/redirects, daily deferral, path-scoped mutex, legacy-manifest migration, updater launch contract |
+| Recurring EA update opportunities | `tests/test_native_update_schedule.py` | Actual scheduler body: ten-second initial boundary, hourly recurrence, disabled/uninitialized gates and failed-launch throttling; process launch is a stub |
+| Production-function risk/controller | `tests/test_native_risk_trade.py`, `tests/test_native_controller.py`, `tests/test_native_full_controls.py` | Extracted production bodies, stop-limit fill, overnight sessions, readiness, inventory failure, numeric replacement, render retry, explicit Full choices and safe SL-batch collection |
+| Production-function UI | `tests/test_native_ui.py` | Measured field/selection/caret bounds, pagination, missing-data states, DPI resources, contrast and canvas-allocation failure |
+| Production-function plan/marker regression | `tests/test_native_plan_preservation.py`, `tests/test_native_exposure_review.py` | Per-symbol and legacy round trips, actual controller transitions, fixed protective prices across mode cycles, invalid saved plans, unsupported Pending recovery, separated handles and label lanes at supported scales |
+| Current-source installer | `tests/conftest.py`, `installer/cmd/setup/audit_regression_windows_test.go` | Synthetic nontrading payload, no historical build dependency, migration collision, rollback restoration failure, worker cleanup and path linkage |
+
+Native function fixtures compile extracted MQL bodies as C++17 with deterministic platform stubs. MQL array signatures/declarations receive documented syntax-only adapters where needed. They are stronger than duplicated reference models but do not emulate UTF-16, MT5's event queue, native canvas rasterization or broker behavior. Require g++ and inspect skipped tests explicitly. Fresh installer PE tests require Go, Git Bash and pytest; they do not require a private signing key.
 
 Automated command:
 
@@ -29,11 +36,11 @@ Automated command:
 
 ## 3. Native compile gate
 
-On Windows, run `scripts\build_release.ps1`. Acceptance requires:
+For an authorized release, run `scripts\build_release.ps1`. For a no-install/no-sign audit, copy EA sources to an ignored audit-owned directory and invoke MetaEditor with `/compile` and `/log`, hidden. Do not use a release workflow that reads production signing keys or replaces canonical/release artifacts. Acceptance requires:
 
 - MetaEditor result exactly `0 errors, 0 warnings`;
-- nonempty `LotCraft.ex5` at the canonical source output path;
-- staged EX5 byte-identical to canonical;
+- nonempty EX5 at the documented output path;
+- staged/canonical equality only when that packaging operation was actually performed;
 - no unexpected compiler diagnostic in the full log.
 
 ## 4. Manual MT5 calculation matrix
@@ -46,14 +53,14 @@ For every case, record symbol, account currency, symbol properties, configured v
 4. Account basis: Equity, Balance, Manual.
 5. Live equity/balance changes under each authority.
 6. Manual value persistence across mode switches and terminal restart.
-7. Commission zero, one-side nonzero, and round-trip nonzero.
+7. Commission zero in the current UI. Nonzero engine cases require fixtures; no visible commission control is provided.
 8. Forex, metal, index, energy, and exchange-style demo symbols.
 9. A symbol whose profit currency differs from account currency.
 10. Distinct digits, tick sizes, volume steps, volume minima/maxima, and volume limits.
 11. Below-minimum, above-maximum, and aggregate-limit requests.
 12. Stop distance zero, one tick, large, crossed, and inside stops/freeze levels.
 13. Missing quote, stale quote, and invalid/unavailable symbol properties where reproducible.
-14. Independent spreadsheet or broker-calculator comparison proving downward lot rounding does not exceed requested risk.
+14. Independent comparison of downward rounding and the explicit minimum-volume exception, where actual risk may exceed target.
 
 ## 5. Manual editing matrix
 
@@ -100,14 +107,14 @@ Use minimum practical demo volume or a mocked request gateway. Never use a live 
 
 1. Valid Long and Short market requests.
 2. All four valid pending subtypes.
-3. Confirmation approve, cancel, changed quote reconfirm, and second-change abort.
+3. New-order confirmation approve/cancel, refreshed valid quote with no second confirmation, and refreshed invalid request with no send. Separately test changed SL-batch target-set confirmation and second-set-change abort.
 4. Rapid double-click and held input while submission starts.
 5. Requote, stale price, invalid stops, invalid volume, unsupported fill, market closed, no connection, trading disabled, and explicit server rejection.
 6. Confirm reported retcode and IDs match the terminal/server result.
 7. Move SLs with zero, one, and multiple eligible positions/orders.
 8. Hedging and netting accounts.
 9. One forced modification failure among otherwise eligible targets.
-10. Verify no request changes another symbol, direction, TP, entry, volume, or unrelated order property.
+10. Verify no request changes another symbol, TP, entry, volume, or unrelated order property. SL batches intentionally include both directions when eligible.
 
 ## 9. Installer and release matrix
 
@@ -122,8 +129,8 @@ Use minimum practical demo volume or a mocked request gateway. Never use a live 
 9. Uninstall from the copied uninstaller and from setup `-uninstall` mode.
 10. Tampered EX5, updater, uninstaller, or manifest must fail closed and preserve unrelated files.
 11. Verify migration from the legacy three-file v1.0.0 manifest to the four-file updater-aware manifest.
-12. Inject a failure at every atomic commit position and verify the prior installation is restored.
-13. Verify updater mutex exclusion, once-per-24-hour checks, 24-hour deferral, stable-only selection, API parsing, redirects, timeouts, response limits, signatures, sizes, and hashes.
+12. Inject failure at every staged commit position. Verify restoration when possible and explicit recovery errors with retained backups when restoration fails. Per-file renames do not prove crash-atomicity.
+13. Verify updater mutex exclusion, 24-hour attempt throttling, 24-hour same-version deferral, stable-only selection, API parsing, redirects, timeouts, response limits, signatures, sizes, and hashes. Verify a launch opportunity after ten seconds and hourly while attached, no per-tick failure retries, and no launch in Strategy Tester. Old 1.2.0 activation needs a normal reattachment or restart.
 14. Verify canonical, staged, installed, and installer SHA-256 values plus signed bootstrap metadata.
 
 ## 10. Long-duration and performance checks
@@ -137,12 +144,12 @@ Use minimum practical demo volume or a mocked request gateway. Never use a live 
 
 ## 11. Symbol transition, pending stability, and marker ownership regression
 
-1. On USDJPY M15 select Long and Pending, place a valid separated E/S plan, then replace the chart symbol with USTEC. The first coherent render must remain Long/Pending, contain only USTEC-scaled prices, show separated E/S markers, and calculate a positive size when broker/account constraints permit it.
-2. Repeat the USDJPY-to-USTEC replacement for Short and for Instant. Direction and mode must survive; old numeric prices must never survive.
+1. On USDJPY M15 select Long/Pending, place a valid E/S plan, then replace the symbol with a previously unseen USTEC. The first coherent render must contain only USTEC-scaled prices. A previously saved USTEC restores its own Direction/mode/Entry/SL/TP instead. Positive size remains conditional on valid broker/account data.
+2. Repeat for Short/Instant, then return to USDJPY. Its last chosen SL/TP and mode must be restored. Never reuse another symbol's numbers. Repeat EURUSD/gold and index round trips.
 3. Change timeframe on one symbol and return. Entry, SL, TP, Direction, and mode must remain the exact same-symbol plan after tick normalization. No reanchor is allowed for timeframe, zoom, or resize alone.
-4. On US30 start with a valid Long Instant plan, record SL, then choose Pending. Pending must become active immediately with the exact prior SL, a deterministic supported subtype, and a positive size. Observe for ten seconds while the quote remains inside half the construction safety buffer; order subtype and validity must not oscillate.
+4. On US30 start with a valid Long Instant plan, record SL/TP, then alternate Pending/Instant at least 30 times. SL/TP must remain exact. Instant Entry follows the quote; Pending Entry remains conditional on its quote leg. Confirm a quote crossing the saved SL disables execution without moving it.
 5. Repeat the Instant-to-Pending test for Short and with Limit disabled/Stop enabled. If neither pending subtype is supported, the previous complete Instant model and calculation must remain unchanged and a capability error must be shown.
-6. Overlap the 36-by-26 E/S hit rectangles while keeping their prices distinct. Press their shared pixels and drag. S must be visually above E and only SL may follow the captured pointer through release.
+6. Put E/S/T prices close enough that their original hit rectangles would overlap. Handles must separate horizontally and retain exact price/Y. Each handle must select its own level. S retains first overlap priority when space is insufficient. Position-loss labels must not cover these handles; details remain available when no lane fits.
 7. Repeat the basic checks in Full, Compact, and Mini views and both themes. No layout, editor, stepper, panel-drag, or line-flicker behavior may regress.
 
 ## 12. SL exposure and adaptive UI acceptance matrix
@@ -159,3 +166,5 @@ Use minimum practical demo volume or a mocked request gateway. Never use a live 
 | Trading regression | Confirmation behavior, final trade control, calculated volume, pending/instant behavior, and `Move SLs to line` remain unchanged. |
 
 Automated evidence covers arithmetic, sorting, incomplete-data behavior, source ownership, persistence allowlisting, canvas count, hit-test precedence, DPI-scaled tokens, and compile contracts. Actual MT5 appearance and broker interaction remain user-run manual acceptance; this implementation task intentionally performs no live MT5 UI or live-trading verification.
+
+Current command results belong in [audit verification](AUDIT_VERIFICATION_2026-09-09.md), not in this acceptance checklist. Record blocked and skipped cases without converting them into passes.

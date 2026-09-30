@@ -544,7 +544,7 @@ Do not weaken unrelated assertions to make the suite pass.
 Run from:
 
 ```text
-F:\Giuthub Projects\Experts\PashoolSizer-1.0.0-theme-work
+<LotCraft repository root>
 ```
 
 ### 8.1 Fast targeted loop

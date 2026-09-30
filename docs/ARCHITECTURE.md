@@ -1,4 +1,4 @@
-# LotCraft 1.2.0 Architecture
+# LotCraft 1.2.1 Architecture
 
 ## 1. Product boundary
 
@@ -31,13 +31,13 @@ The controller enforces these invariants:
 
 1. Prices are finite and normalized to `SYMBOL_TRADE_TICK_SIZE` before they become committed model values.
 2. Instant Entry is synchronized to Ask for Long and Bid for Short. Pending Entry is the durable manually configured value.
-3. Long SL is below effective Entry and enabled TP is above it. Short SL is above effective Entry and enabled TP is below it.
-4. A nonzero final lot size is aligned downward to the broker volume lattice and is rechecked so volume rounding cannot make actual risk exceed requested risk.
+3. An executable Long requires SL below effective Entry and enabled TP above it; Short requires the inverse. A saved planning level remains fixed if the quote crosses it. Such a plan is visible but non-executable until corrected.
+4. Final volume follows the broker's volume lattice and capacity limits. Ordinary sizing rounds downward; an explicitly supported below-minimum request uses minimum volume when capacity permits. That exception can exceed requested risk and is identified by `volume_raised_to_minimum` and the separately displayed actual risk.
 5. Trade creation and stop modification use separate controller paths and separate request builders.
 6. Every chart object that can be deleted by cleanup must prove the current LotCraft instance prefix.
 7. LotCraft horizontal lines are repeatedly locked nonselectable and nonselected. Dedicated rectangle-label handles are the only owned chart drag targets.
-8. Multi-field symbol and order-mode transitions are constructed and validated in a local candidate model, then committed once. Rendering never observes a partially changed transition.
-9. Different-symbol transitions preserve Direction and Instant/Pending preference but generate new symbol-scaled prices. Same-symbol lifecycle changes restore the complete saved price plan.
+8. Multi-field symbol and order-mode transitions use a local numeric candidate, then commit once. Rendering never observes a partially changed transition. Execution permission is validated separately.
+9. Returning to a saved symbol restores its own Direction/mode/Entry/SL/TP. A first visit uses the current Direction/mode preference and new symbol-scaled prices. Same-symbol timeframe changes restore the saved price plan. Mode changes never translate SL or TP.
 
 ## 4. Calculation pipeline
 
@@ -51,10 +51,13 @@ A coherent recalculation follows this sequence:
 6. Call `OrderCalcProfit()` for one lot from effective Entry to SL. Use the absolute account-currency loss and add the configured commission interpretation.
 7. Divide requested money risk by one-lot risk.
 8. Cap downward by `SYMBOL_VOLUME_MAX` and remaining directional `SYMBOL_VOLUME_LIMIT`.
-9. Quantize downward from `SYMBOL_VOLUME_MIN` in `SYMBOL_VOLUME_STEP` increments. Reject a result below minimum.
-10. Recompute actual money and percentage risk from the final volume and verify the no-risk-overrun postcondition.
+9. Quantize downward from `SYMBOL_VOLUME_MIN` in `SYMBOL_VOLUME_STEP` increments. A positive below-minimum request can use the broker minimum, but never exceed maximum or remaining directional capacity.
+10. Recompute actual money and percentage risk from final volume. Enforce the risk cap except for the explicit minimum-volume exception.
+11. Set `sizing_available` when planning succeeds. Separately set `valid` only when connection, permissions, session, current quote and allowed direction support execution. A usable cached quote can support planning without enabling trade submission.
 
 The calculation layer does not use hard-coded pip values, contract sizes, lot steps, currencies, or instrument-class assumptions.
+
+Commission arithmetic remains in the engine, but the current UI has no commission editor and initialization resets commission to zero. Displayed estimates therefore do not include unknown broker closing fees. Failed directional inventory enumeration invalidates market readiness instead of publishing partial capacity totals.
 
 ## 5. Editing state machine
 
@@ -68,6 +71,8 @@ Each accepted key edits raw text first. A complete valid number is applied immed
 
 `Enter` validates and normalizes. `Escape` restores the pre-edit model. Click-away commits valid text and rejects invalid text without leaving NaN, infinity, or a partial value in the model. Read-only outputs have no field mapping and cannot enter the editor state.
 
+Input is bounded to 32 characters after subtracting selected replacement text. A measured viewport keeps focused text, caret and selection inside the field; pointer mapping uses that same viewport. Read-only values fit within their bounds or use explicit truncation rather than painting over adjacent controls.
+
 ## 6. Pointer ownership and rendering
 
 Hit testing is ordered as follows:
@@ -77,6 +82,8 @@ Hit testing is ordered as follows:
 3. Unowned chart space.
 
 Within overlapping level handles, Stop has explicit priority over Entry, and Entry over Take-profit. The canvases use the same z-order and paint order. The captured level is fixed on mouse-down, so later pointer samples cannot transfer a Stop drag to Entry.
+
+Nearby E/S/T markers use separate horizontal lanes while keeping their true price/Y coordinates. Position-loss label lanes exclude the panel, details surface and level handles. Horizontal marker layout changes invalidate the cached label lane; price/Y motion alone does not. If no label lane fits, the details surface remains available.
 
 While LotCraft owns a pointer or keyboard interaction, the UI guard saves and temporarily disables chart mouse scrolling, context menu, crosshair tool, broker trade-level dragging, keyboard chart control, and quick navigation. The exact saved values are restored when ownership ends, on pointer exit, on failure, and during deinitialization.
 
@@ -105,8 +112,8 @@ The main action uses this guarded sequence:
 3. Reacquire market/account data and recalculate.
 4. Validate permissions, session state when known, symbol direction, order capability, filling, expiration, prices, stops, volume, and risk.
 5. Build a complete immutable confirmation snapshot and request.
-6. When confirmation is enabled, display every required field. Cancellation sends nothing.
-7. Rebuild after confirmation. A material change causes one updated confirmation. A second material change aborts without sending.
+6. When confirmation is enabled, show requested risk, actual risk, and the send question. Cancellation sends nothing.
+7. Rebuild and validate once after confirmation without another new-order confirmation. Invalid refreshed data aborts. A symbol transition cannot reuse the old snapshot.
 8. Run `OrderCheck()`.
 9. Run `OrderSend()` once.
 10. Treat only accepted server retcodes as success and report the actual retcode, order ID, and deal ID when available.
@@ -116,6 +123,8 @@ The main action uses this guarded sequence:
 Eligibility is every open position and active pending order on the current chart symbol, regardless of the panel's selected direction. A target is included when the red-line SL is valid for that entity and its current SL differs from the red-line price by more than half a tick. This permits both tightening and widening because the button's explicit purpose is exact alignment to the user-positioned line.
 
 Immediately before each request, the implementation reacquires market state, reselects the ticket, rechecks entity type, symbol, direction, current entry, current SL, and broker distance. Position requests use `TRADE_ACTION_SLTP`; pending-order requests use `TRADE_ACTION_MODIFY`. Existing TP and all unrelated order properties are copied from the live entity. Results are reported per ticket, including partial batch failure.
+
+Collection or allocation failure invalidates the complete target set and sends nothing. Unlike the single new-order confirmation, a changed SL-batch target set can require one updated confirmation; a second set change aborts. Pending SL distance is checked from the intended fill using StopsLevel. FreezeLevel separately gates the existing trigger relative to the executable quote. Stop-limit fill and trigger are not interchangeable.
 
 ## 10. Persistence and lifecycle
 
@@ -129,11 +138,13 @@ Persisted values are limited to:
 - view and theme state;
 - line visibility;
 - Direction and Instant/Pending preference;
-- one complete Entry/SL/TP planning snapshot guarded by the saved symbol hash.
+- complete Direction/mode/Entry/SL/TP plans keyed separately by symbol hash.
 
-Direction and order mode load independently of the symbol hash. Entry, SL, and TP load only as one complete set when the saved symbol matches the current symbol and the plan is structurally coherent. A different symbol therefore keeps the user's planning preferences but never reuses old-symbol numbers. A timeframe change on the same symbol restores the exact normalized plan. The key includes account login, server hash, and chart ID hash. Object ownership includes account/server/chart-derived instance data.
+Global Direction/mode remain defaults for unseen symbols. Each saved symbol overrides them with its complete plan before any default is built. Short per-symbol suffixes fit MT5's key-length limit; a complete-record marker rejects partial writes. The old one-symbol tuple remains a migration/rollback bridge. Invalid executable geometry alone does not discard a finite saved plan. A timeframe change on the same symbol restores the normalized plan. The key includes account login, server hash, and chart ID hash. Object ownership uses account/server/chart-derived instance data.
 
-Fresh-symbol planning derives a broker-valid, tick-normalized Entry/SL geometry from the new quote, symbol capabilities, price-relative minimum gap, and a 34-pixel viewport target when the viewport is coherent. Pending construction prefers a supported Limit between quote and SL and falls back to a supported Stop. Instant-to-Pending uses the same candidate discipline, preserves SL exactly, and creates an unambiguous buffered pending Entry before recalculation.
+Terminal-global writes are not a multi-key crash-atomic transaction. MT5 expires globals after four weeks without access; this is not indefinite archival storage. Structural checks govern reload. A failed transition can be canceled by returning to the original symbol without discarding its plan. Hidden waiting or failed-render controls cannot receive actions. Rendering failure retains dirty work and retries at most once per second until the panel is available.
+
+Fresh-symbol planning derives tick-normalized Entry/SL geometry from the quote, price-relative minimum gap and a 34-pixel viewport target when the viewport is coherent. Pending construction prefers a supported Limit between quote and SL and falls back to a supported Stop. If Pending is unsupported, the fresh planning view stays available so the user can choose Instant; execution still rejects the unsupported subtype. Instant-to-Pending preserves SL/TP and creates a buffered pending Entry. Pending-to-Instant replaces only Entry with the executable quote. Both paths recalculate and validate execution afterward.
 
 Deinitialization kills the timer, commits or rolls back any active edit safely, flushes allowed state, restores chart properties, and deletes only objects with the proven instance prefix.
 
@@ -150,7 +161,9 @@ The Windows x64 installer is a separate Go program with the canonical `LotCraft.
 
 Source files are not installer-owned and are not included in the end-user install set.
 
-The EA launches the updater once, ten seconds after initialization, and never in Strategy Tester. The installed updater first verifies its four-file schema and hash, then runs the check from a verified temporary copy so an approved installer can replace the installed updater atomically. An installation-scoped Windows mutex prevents overlapping checks across charts.
+The EA offers an updater launch ten seconds after initialization, then hourly while attached, and never in Strategy Tester. It schedules the next opportunity before launch so a failure cannot repeat on every UI timer tick. The installed updater verifies its four-file manifest and hashes, then runs from a verified temporary copy so an approved installer can replace the installed updater. The local install manifest is hash-checked, not signed. An installation-scoped mutex prevents overlapping checks across charts. Network attempts remain throttled for 24 hours, including failures; hourly launches do not bypass the throttle. Older 1.2.0 EAs need a reattachment or restart for a launch opportunity.
+
+Owned-file replacement uses staged files, per-file renames and rollback backups. It is not a crash-atomic four-file commit. Restoration failure must remain an explicit recovery condition, not a successful preservation claim.
 
 The updater accepts only a newer stable semantic version from the latest GitHub release. It verifies an Ed25519 signature over the exact release JSON, then verifies the installer’s signed byte size and SHA-256 before execution. Local per-installation state and a rotating log live under `%LOCALAPPDATA%\LotCraft\Updater`; no account, trading, credential, or telemetry data is collected.
 
@@ -171,6 +184,8 @@ OnTradeTransaction / 1 s timer / symbol transition
 
 `PS_ExposureCalculate` enumerates open positions and active pending orders, projects each stored Entry-to-SL result through `OrderCalcProfit`, and records missing-SL or unavailable rows explicitly. Open positions include currently accrued swap. Headline totals are downside-only, so a profitable trailing stop never offsets another row's projected loss. Chart scope matches the current symbol exactly; account scope includes every symbol.
 
+For each valid row, loss is `max(0, -projected_result)`; percentages divide that loss by current positive finite equity. Pending stop-limit orders use the limit leg as the projected fill. No magic-number filter is applied. Failed selection, array allocation or inventory count drift invalidates the snapshot and triggers a bounded retry. Missing-SL and unavailable rows retain their counts; a summary with such rows says Incomplete and labels the known protected amount. Invalid enumeration says Unavailable. Zero equity removes the percentage, not valid money results. Count checks cannot prove a transactionally frozen inventory when tickets change without a count change.
+
 The panel summary, details sidecar, and chart labels consume the same cached snapshot. Rendering never re-enumerates broker positions or orders. Pointer movement stays on the existing line-only path; exposure calculation and label collision resolution run only on trade/symbol/timer refresh or an explicitly dirty render surface.
 
-The sidecar is one bitmap canvas with adaptive right, left, below, above, then clamped-overlay placement. Chart labels are a separate transparent canvas below the E/S/TP handle canvases. Hit precedence outside the panel is handles, sidecar, exposure labels, then unowned chart space.
+The sidecar is one bitmap canvas with adaptive right, left, below, above, then clamped-overlay placement. Its page capacity is derived from available height, up to eight rows. Price/volume precision is cached per symbol before paint. Open-position chart labels use up to 128 individual opaque bitmap canvases, bounded by available vertical space, not one combined canvas; pending orders remain in details. Hit precedence outside the panel is handles, sidecar, exposure labels, then unowned chart space.

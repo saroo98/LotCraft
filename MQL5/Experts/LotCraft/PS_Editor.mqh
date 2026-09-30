@@ -86,7 +86,8 @@ void PS_EditorDeleteSelection(PSEditorState &editor)
 
 void PS_EditorInsert(PSEditorState &editor,const string text)
   {
-   if(text=="" || StringLen(editor.raw_text)+StringLen(text)>32) return;
+   int replaced=(editor.has_selection ? PS_EditorSelectionEnd(editor)-PS_EditorSelectionStart(editor) : 0);
+   if(text=="" || StringLen(editor.raw_text)-replaced+StringLen(text)>32) return;
    PS_EditorDeleteSelection(editor);
    string left=(editor.cursor>0 ? StringSubstr(editor.raw_text,0,editor.cursor) : "");
    string right=(editor.cursor<StringLen(editor.raw_text) ? StringSubstr(editor.raw_text,editor.cursor) : "");

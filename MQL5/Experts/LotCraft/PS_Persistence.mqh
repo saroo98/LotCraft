@@ -22,6 +22,68 @@ bool PS_PersistenceRead(const string key,double &value)
    return(PS_IsFinite(value));
   }
 
+string PS_PersistencePlanBase(const string base,const string symbol)
+  {
+   // Short suffixes keep plan keys within MT5's 63-character limit even for
+   // a 19-digit account login. Configuration keys retain their old namespace.
+   return(base+StringFormat(".P%08X",PS_HashString32(symbol)));
+  }
+
+bool PS_PersistenceSavePlan(const string base,const PSMarketSnapshot &market,const PSModel &model)
+  {
+   if(market.symbol=="" || !PS_IsPositiveFinite(model.entry) ||
+      !PS_IsPositiveFinite(model.stop_loss) || !PS_IsFinite(model.take_profit) ||
+      model.take_profit<0.0) return(false);
+   string plan=PS_PersistencePlanBase(base,market.symbol);
+   // Incomplete writes cannot be mistaken for a complete saved plan.
+   if(GlobalVariableSet(plan+".v",0.0)==0) return(false);
+   if(GlobalVariableSet(plan+".d",(double)model.direction)==0 ||
+      GlobalVariableSet(plan+".m",(double)model.order_mode)==0 ||
+      GlobalVariableSet(plan+".e",model.entry)==0 ||
+      GlobalVariableSet(plan+".s",model.stop_loss)==0 ||
+      GlobalVariableSet(plan+".t",model.take_profit)==0) return(false);
+   return(GlobalVariableSet(plan+".v",1.0)!=0);
+  }
+
+bool PS_PersistenceLoadPlan(const string base,const PSMarketSnapshot &market,PSModel &model)
+  {
+   if(market.symbol=="") return(false);
+   string plan=PS_PersistencePlanBase(base,market.symbol);
+   double complete=0.0,entry=0.0,stop=0.0,take=0.0;
+   double direction=0.0,mode=0.0;
+   if(GlobalVariableCheck(plan+".v"))
+     {
+      if(!PS_PersistenceRead(plan+".v",complete) || complete!=1.0 ||
+         !PS_PersistenceRead(plan+".d",direction) ||
+         !PS_PersistenceRead(plan+".m",mode) ||
+         !PS_PersistenceRead(plan+".e",entry) ||
+         !PS_PersistenceRead(plan+".s",stop) ||
+         !PS_PersistenceRead(plan+".t",take)) return(false);
+     }
+   else
+     {
+      // Migrate the last legacy chart plan when its symbol matches. An older
+      // binary can still read the legacy tuple written below.
+      double symbol=0.0;
+      if(!PS_PersistenceRead(PS_PersistenceKey(base,"plansym"),symbol) ||
+         (uint)symbol!=PS_HashString32(market.symbol) ||
+         !PS_PersistenceRead(PS_PersistenceKey(base,"direction"),direction) ||
+         !PS_PersistenceRead(PS_PersistenceKey(base,"ordermode"),mode) ||
+         !PS_PersistenceRead(PS_PersistenceKey(base,"entry"),entry) ||
+         !PS_PersistenceRead(PS_PersistenceKey(base,"stop"),stop) ||
+         !PS_PersistenceRead(PS_PersistenceKey(base,"take"),take)) return(false);
+     }
+   if((direction!=PS_DIRECTION_LONG && direction!=PS_DIRECTION_SHORT) ||
+      (mode!=PS_ORDER_INSTANT && mode!=PS_ORDER_PENDING) ||
+      !PS_IsPositiveFinite(entry) || !PS_IsPositiveFinite(stop) || take<0.0) return(false);
+   model.direction=(PSDirection)direction;
+   model.order_mode=(PSOrderMode)mode;
+   model.entry=entry;
+   model.stop_loss=stop;
+   model.take_profit=take;
+   return(true);
+  }
+
 void PS_PersistenceSave(const string base,const PSMarketSnapshot &market,const PSModel &model,
                         const PSExposureUIState &exposure_ui)
   {
@@ -44,6 +106,7 @@ void PS_PersistenceSave(const string base,const PSMarketSnapshot &market,const P
    GlobalVariableSet(PS_PersistenceKey(base,"Exposure.ChartLabels"),(exposure_ui.chart_labels_visible ? 1.0 : 0.0));
    if(market.symbol!="")
      {
+      PS_PersistenceSavePlan(base,market,model);
       GlobalVariableSet(PS_PersistenceKey(base,"plansym"),(double)PS_HashString32(market.symbol));
       GlobalVariableSet(PS_PersistenceKey(base,"direction"),(double)model.direction);
       GlobalVariableSet(PS_PersistenceKey(base,"ordermode"),(double)model.order_mode);
@@ -118,31 +181,7 @@ bool PS_PersistenceLoad(const string base,const PSMarketSnapshot &market,PSModel
          model.order_mode=(PSOrderMode)order_mode;
      }
 
-   double persisted_symbol=0.0;
-   bool same_planning_symbol=
-      (market.symbol!="" &&
-       PS_PersistenceRead(PS_PersistenceKey(base,"plansym"),persisted_symbol) &&
-       (uint)persisted_symbol==PS_HashString32(market.symbol));
-   bool same_symbol_plan_loaded=false;
-   if(same_planning_symbol)
-     {
-      double entry=0.0;
-      double stop=0.0;
-      double take=0.0;
-      bool entry_ok=(PS_PersistenceRead(PS_PersistenceKey(base,"entry"),entry) &&
-                     PS_IsPositiveFinite(entry));
-      bool stop_ok=(PS_PersistenceRead(PS_PersistenceKey(base,"stop"),stop) &&
-                    PS_IsPositiveFinite(stop));
-      bool take_ok=(PS_PersistenceRead(PS_PersistenceKey(base,"take"),take) &&
-                    PS_IsFinite(take) && take>=0.0);
-      if(entry_ok && stop_ok && take_ok)
-        {
-         model.entry=entry;
-         model.stop_loss=stop;
-         model.take_profit=take;
-         same_symbol_plan_loaded=true;
-        }
-     }
+   bool same_symbol_plan_loaded=PS_PersistenceLoadPlan(base,market,model);
    model.revision++;
    return(same_symbol_plan_loaded);
   }

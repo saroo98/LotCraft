@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 PRODUCT = "LotCraft"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 SUMMARY_RE = re.compile(r"(?i)(\d+)\s+errors?\s*,\s*(\d+)\s+warnings?")
 
 
@@ -41,7 +41,9 @@ def read_text_auto(path: Path) -> str:
 
 
 def artifact_record(path: Path) -> dict[str, Any]:
-    record: dict[str, Any] = {"path": str(path.resolve()), "exists": path.is_file()}
+    # This report is publishable. Artifact roles distinguish same-named files;
+    # absolute source/terminal paths must never become release metadata.
+    record: dict[str, Any] = {"path": path.name, "exists": path.is_file()}
     if not record["exists"]:
         record.update({"size": None, "sha256": None})
         return record
@@ -51,7 +53,7 @@ def artifact_record(path: Path) -> dict[str, Any]:
 
 
 def compile_record(path: Path) -> dict[str, Any]:
-    record: dict[str, Any] = {"path": str(path.resolve()), "exists": path.is_file()}
+    record: dict[str, Any] = {"path": path.name, "exists": path.is_file()}
     if not record["exists"]:
         record.update({"summary_found": False, "errors": None, "warnings": None, "passed": False})
         return record
@@ -137,7 +139,7 @@ def main() -> int:
             )
             signed_update["signature_verified"] = verify.returncode == 0
             if verify.returncode != 0:
-                signed_update["error"] = (verify.stderr or verify.stdout).strip()
+                signed_update["error"] = "Signed update verification failed. Check the local artifacts and pinned public key."
             try:
                 metadata = json.loads(update_manifest.read_text(encoding="utf-8"))
                 descriptor = metadata["installer"]
@@ -150,8 +152,8 @@ def main() -> int:
                     and descriptor["size"] == setup["size"]
                     and descriptor["sha256"].lower() == setup["sha256"]
                 )
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                signed_update["error"] = f"Invalid signed update metadata: {exc}"
+            except (KeyError, TypeError, ValueError, AttributeError, json.JSONDecodeError):
+                signed_update["error"] = "Invalid signed update metadata."
 
     canonical_nonempty = bool(canonical["exists"] and canonical["size"] and canonical["size"] > 0)
     staged_nonempty = bool(staged["exists"] and staged["size"] and staged["size"] > 0)
@@ -220,11 +222,11 @@ def main() -> int:
     if not complete:
         print(
             "Release verification is incomplete. Missing or failed evidence is recorded in "
-            f"{output_json}.",
+            f"{output_json.name}.",
             file=sys.stderr,
         )
         return 1
-    print(f"Release verification passed: {output_json}")
+    print(f"Release verification passed: {output_json.name}")
     return 0
 
 

@@ -23,7 +23,7 @@ def run_verifier(
     compile_log.write_text(compile_summary, encoding="utf-16")
     canonical = tmp_path / "canonical" / "LotCraft.ex5"
     staged = tmp_path / "release" / "LotCraft.ex5"
-    installer = tmp_path / "release" / "LotCraft-1.2.0-Setup.exe"
+    installer = tmp_path / "release" / "LotCraft-1.2.1-Setup.exe"
     installed = tmp_path / "terminal" / "MQL5" / "Experts" / "LotCraft" / "LotCraft.ex5"
     for path in [canonical, staged, installer, installed]:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -64,8 +64,8 @@ def run_verifier(
                 "go", "run", "./cmd/releasesign", "sign",
                 "-private-key", str(private_key),
                 "-installer", str(installer),
-                "-version", "1.2.0",
-                "-tag", "v1.2.0",
+                "-version", "1.2.1",
+                "-tag", "v1.2.1",
                 "-manifest", str(manifest),
                 "-signature", str(signature),
             ],
@@ -123,3 +123,44 @@ def test_release_verifier_rejects_tampered_signed_metadata(tmp_path: Path):
     assert result.returncode == 1
     assert report["artifacts"]["signed_update"]["signature_verified"] is False
     assert report["requirements"]["complete"] is False
+
+
+def test_publishable_verification_never_contains_machine_paths(tmp_path: Path):
+    private_root = tmp_path / "PrivateTrader" / "Terminal-PrivateIdentifier"
+    private_root.mkdir(parents=True)
+    result, report = run_verifier(private_root, require_installed=True)
+    assert result.returncode == 0
+    published = (private_root / "release" / "RELEASE-VERIFICATION.json").read_text(encoding="utf-8")
+    checksums = (private_root / "release" / "SHA256SUMS.txt").read_text(encoding="utf-8")
+    for output in (published, checksums, result.stdout):
+        assert "PrivateTrader" not in output
+        assert "Terminal-PrivateIdentifier" not in output
+        assert str(tmp_path) not in output
+    assert report["comparisons"]["canonical_equals_installed"] is True
+
+
+def test_failed_signature_verification_output_is_also_publish_safe(tmp_path: Path):
+    private_root = tmp_path / "PrivateTrader" / "Terminal-PrivateIdentifier"
+    private_root.mkdir(parents=True)
+    result, report = run_verifier(private_root, signed_update=True, tamper_signature_input=True)
+    assert result.returncode == 1
+    assert report["artifacts"]["signed_update"]["error"]
+    for output in (
+        (private_root / "release" / "RELEASE-VERIFICATION.json").read_text(encoding="utf-8"),
+        (private_root / "release" / "SHA256SUMS.txt").read_text(encoding="utf-8"),
+        result.stdout,
+        result.stderr,
+    ):
+        assert "PrivateTrader" not in output
+        assert "Terminal-PrivateIdentifier" not in output
+        assert str(tmp_path) not in output
+
+
+def test_hash_mismatch_output_is_publish_safe(tmp_path: Path):
+    private_root = tmp_path / "PrivateTrader"
+    private_root.mkdir(parents=True)
+    result, report = run_verifier(private_root, require_installed=True, installed_matches=False)
+    assert result.returncode == 1
+    assert not report["comparisons"]["canonical_equals_installed"]
+    assert "PrivateTrader" not in json.dumps(report)
+    assert "PrivateTrader" not in result.stdout + result.stderr

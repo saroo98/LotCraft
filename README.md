@@ -1,139 +1,135 @@
-# LotCraft
+# LotCraft: MT5 Position Sizer and Risk Calculator
 
-<p align="center">
-  <strong>Precise risk-based position sizing and deliberate order entry for MetaTrader 5.</strong>
-</p>
+LotCraft is a Windows Expert Advisor for **MetaTrader 5 (MT5)**. Calculate position size from your risk budget and stop loss, compare target risk with actual SL loss, and inspect chart-wide and account-wide exposure before you place a trade.
 
-<p align="center">
-  <img alt="MetaTrader 5" src="https://img.shields.io/badge/MetaTrader-5-1684d5?style=flat-square">
-  <img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078d4?style=flat-square">
-  <img alt="Version 1.2.0" src="https://img.shields.io/badge/version-1.2.0-2fbd72?style=flat-square">
-  <a href="https://github.com/saroo98/LotCraft/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/download-latest%20release-2fbd72?style=flat-square"></a>
-</p>
+[![Latest stable release](https://img.shields.io/github/v/release/saroo98/LotCraft?style=flat-square)](https://github.com/saroo98/LotCraft/releases/latest)
+![Platform: Windows x64](https://img.shields.io/badge/platform-Windows%20x64-0078d4?style=flat-square)
+![Language: MQL5 and Go](https://img.shields.io/badge/source-MQL5%20%2B%20Go-59636e?style=flat-square)
 
-## Full, Compact and Mini modes
+**[Download the latest installer](https://github.com/saroo98/LotCraft/releases/latest)** · [Installation](#install-lotcraft) · [Update alerts](#automatic-updates-and-release-alerts) · [Build and test](#build-and-test)
 
-<p align="center">
-  <img src="docs/images/lotcraft-full.png" width="390" alt="LotCraft Full mode with private monetary amounts blurred">
-</p>
+LotCraft is a discretionary trading tool, not a trading strategy. It does not generate signals or send autonomous orders. Start on a demo account.
 
-<p align="center">
-  <img src="docs/images/lotcraft-compact.png" width="390" alt="LotCraft Compact mode with private monetary amounts blurred">
-</p>
+## Position sizing and stop-loss exposure
 
-<p align="center">
-  <img src="docs/images/lotcraft-mini.png" width="390" alt="LotCraft Mini mode">
-</p>
+| Feature | What it does |
+|---|---|
+| Risk-based lot sizing | Uses Equity, Balance or a Manual amount, your risk budget, Entry and SL, and the broker's symbol specifications. |
+| Target risk / Actual SL loss | Separates the requested budget from the estimated loss at the final valid volume, in the account currency. |
+| Current chart / Whole account | Shows protected downside exposure as a percentage of equity and a money amount. Missing SLs and unavailable projections stay visible as incomplete data. |
+| Individual results | Provides position and pending-order details, plus chart labels for open positions when a safe label lane fits. |
+| Instant / Pending | Supports market entry and supported Buy/Sell Limit or Stop orders with explicit submission. |
+| Saved planning levels | Remembers each symbol's plan on the same chart. Mode changes do not move the SL or TP. |
+| Chart controls | Provides draggable Entry, SL and TP handles, price steppers, copy feedback and a line-visibility toggle. |
+| Adaptive panel | Offers Full, Compact and Mini layouts with light and dark themes and DPI-scaled geometry. |
+| Confirmation and SL batches | Offers one risk-only confirmation for new orders and a separate validated action to move eligible current-symbol SLs to the line. |
 
-LotCraft calculates a tradable position size from your chosen account basis, risk percentage, entry price and stop-loss. It gives you draggable chart levels, Full, Compact and Mini layouts, dark and light themes, pending or market entry, confirmation control, and an explicit final trade button.
+The calculator uses broker profit conversion for account-currency values. It can work with available forex, index, metal and other broker symbols when their data and order rules pass validation. Symbol names, contract specifications and available order types vary by broker.
 
-It does **not** generate signals or place autonomous trades. A new order begins only when you press the final Buy or Sell button.
+### Understand the two risk values
 
-## Install
+- **Target risk** is the budget you request.
+- **Actual SL loss** is the estimated loss for the final position size at your SL.
 
-<p align="center">
-  <img src="docs/images/install-flow.svg" width="100%" alt="Three-step LotCraft installation: download, install and attach">
-</p>
+If the budget is below the broker's minimum lot size, LotCraft can use the minimum valid volume when capacity permits. Actual SL loss can then exceed Target risk. Always check the actual amount before confirming.
 
-### 1. Download
+Chart/account exposure uses current **equity**, even when new-trade sizing uses Balance or Manual. It sums downside only; profitable stops do not cancel other positions' losses. Projections include known accrued swap for positions, but cannot guarantee fills or predict gaps, slippage, future swap or unknown closing fees. A missing SL is not zero risk.
 
-Open the [latest GitHub Release](https://github.com/saroo98/LotCraft/releases/latest) and download:
+## What's new in 1.2.1
 
-`LotCraft-1.2.0-Setup.exe`
+- Preserve symbol-specific SL plans when switching away and returning on the same chart.
+- Keep SL/TP prices fixed through repeated Instant/Pending changes.
+- Separate nearby planning handles without changing the saved prices.
+- Keep planning controls available for restricted symbols and improve session-data handling.
+- Harden exposure completeness, numeric text fit, render recovery and explicit Full-mode choices.
+- Strengthen installer ownership, rollback error reporting, updater cleanup and release-evidence privacy.
+- Provide recurring detached update-check opportunities while the EA remains attached.
 
-The installer is self-contained. You do not need to download or copy a separate `.ex5` file.
+The [audit and implementation plan](docs/AUDIT_2026-09-30.md) records the fixes and proof boundaries. The [1.2.1 release report](docs/RELEASE_1.2.1.md) records final build and publication evidence. Offline verification is not native MT5 visual or broker certification.
 
-### 2. Run the installer
+## Install LotCraft
 
-1. Close MetaTrader 5, or leave it open and refresh Navigator after installation.
-2. Double-click `LotCraft-1.2.0-Setup.exe`.
-3. Approve the MT5 terminal data directory detected by the installer.
-4. Wait for the success message.
+Requirements: **Windows x64, MetaTrader 5, and permission to enable DLL imports for LotCraft**.
 
-If Windows SmartScreen appears because the community build is not code-signed, select **More info**, verify that the filename is `LotCraft-1.2.0-Setup.exe`, and then choose **Run anyway** only if you downloaded it from this repository.
+1. Open the [latest stable GitHub release](https://github.com/saroo98/LotCraft/releases/latest).
+2. Download `LotCraft-1.2.1-Setup.exe` and its `LotCraft-1.2.1-SHA256.txt` checksum.
+3. Compare the installer SHA-256 with the published checksum:
+   ```powershell
+   Get-FileHash .\LotCraft-1.2.1-Setup.exe -Algorithm SHA256
+   ```
+4. Run the installer and confirm the intended MT5 terminal data directory. No separate EX5 download or manual folder copying is needed.
+5. In MT5, refresh **Navigator → Expert Advisors**, then attach **LotCraft → LotCraft** to a chart.
+6. Enable **Allow DLL imports** for this EA. Enable **Algo Trading** before submitting an order.
 
-### 3. Attach LotCraft
+If MT5 is already open during installation, reattach LotCraft or restart MT5 later to activate the new EA. The installer does not force a terminal restart.
 
-1. Open MetaTrader 5.
-2. In **Navigator**, right-click **Expert Advisors** and choose **Refresh**.
-3. Expand **Expert Advisors → LotCraft**.
-4. Drag **LotCraft** onto a chart.
-5. Enable **Allow DLL imports** when prompted. LotCraft uses Windows integration for clipboard feedback, native pointer-release handling, the MT5 order-dialog shortcut, and launching its separate updater.
-6. Make sure MT5 **Algo Trading** is enabled before submitting an order.
+The installer is not Authenticode-signed. A filename or checksum from an untrusted source does not establish publisher identity. Download from this repository's release page before deciding whether to accept a Windows security warning. Ed25519 verification protects subsequent automatic updates, not an independently trusted first installation.
 
-LotCraft is now ready. Start on a demo account until you are comfortable with your broker’s symbol specifications and order rules.
+For terminal selection, source compilation, release signing and recovery limits, see [Build and installation](docs/BUILD_AND_INSTALL.md).
 
-## Automatic updates
+## Automatic updates and release alerts
 
-Ten seconds after LotCraft starts, it asks the separately installed `LotCraft-Updater.exe` to check the latest stable GitHub release. The check runs in the background at most once every 24 hours and never blocks ticks, trading, dragging, or rendering.
+### Inside MT5
 
-When a newer signed version is available, you can choose **Yes** to install it or **No** to postpone that version for 24 hours. The updater verifies the release metadata’s Ed25519 signature plus the installer’s exact byte size and SHA-256 before running the installer. A failed download, verification, or installation leaves the current installation intact.
+Starting with **1.2.1**, LotCraft launches its separate updater ten seconds after initialization and then offers another background launch opportunity each hour while attached. The updater allows a network attempt only after **24 hours** since the previous attempt for that installation, including failed attempts. Its mutex prevents overlapping checks.
 
-MetaTrader 5 is never forced to restart. An installed update becomes active when LotCraft is reattached or MT5 is next restarted. Strategy Tester never launches update checks.
+When a newer stable signed release is available, the updater asks **Yes / No**. Yes downloads and verifies the signed metadata, installer byte size and SHA-256 before installation. No defers that version for 24 hours. The new EA activates after reattachment or a later MT5 restart.
 
-## What you can do
+**Updating from 1.2.0:** reattach LotCraft or restart MT5 for the next eligible check, or install 1.2.1 manually. The old EA only launches its updater after initialization; publishing a release cannot remotely add a scheduler to that old binary.
 
-- Calculate position size from Equity, Balance or Free Margin.
-- Set risk as a percentage and see the corresponding account-currency risk.
-- Use Instant or Pending entry.
-- Drag visible Entry and SL markers directly on the chart.
-- Automatically align Long or Short direction from the SL position.
-- Set an optional TP.
-- Hold the plus/minus controls for exponentially accelerating price adjustment.
-- Edit individual digits with normal Windows-style caret and selection behavior.
-- Move all eligible stop losses for the current chart symbol to the LotCraft SL line.
-- Switch between Full, Compact and Mini modes.
-- Use dark or light themes.
-- Require an additional confirmation step before execution.
+Check timing is not a universal notification deadline. MT5 must be running, the EA must be attached, DLL imports must be allowed, the installation must verify, and the network must be available. A due daily attempt may wait for the next hourly opportunity. Strategy Tester never launches update checks. Updates never restart MT5 or place trades.
 
-## Safety model
+### On GitHub
 
-LotCraft is intentionally conservative:
+Select **Watch → Custom → Releases** on [this repository](https://github.com/saroo98/LotCraft) to subscribe to release announcements. Delivery depends on your GitHub notification settings; repository owners cannot force notifications for every installer user. See [GitHub notification guidance](https://docs.github.com/en/subscriptions-and-notifications/get-started/configuring-notifications#configuring-your-watch-settings-for-an-individual-repository).
 
-- It never produces trading signals.
-- It never submits a new order without an explicit press of the final trade control.
-- It validates broker volume, price, stop-distance and filling constraints.
-- It blocks ambiguous netting-account aggregation scenarios.
-- It scopes chart objects, persistent state and installer ownership to LotCraft.
-- The uninstaller removes only files listed in its verified installation manifest.
-- Updates are accepted only from stable GitHub releases whose metadata matches LotCraft’s embedded signing key.
+## Common questions
 
-Trading involves substantial risk. Position sizing reduces avoidable sizing mistakes, but it cannot eliminate slippage, gaps, execution failure or market loss.
+**Why is the trade button disabled?**
 
-## Uninstall
+LotCraft retains planning with usable cached data, but submission still requires current quotes, permissions, supported order/filling types, valid protection prices, volume capacity and broker preflight. A closed market or invalid SL must remain a block. Record the exact message, symbol suffix, mode and version when reporting a rejection.
 
-Run:
+**Why did a saved SL become invalid?**
 
-`MQL5\Experts\LotCraft\LotCraft-Uninstall.exe`
+The market can move past a fixed planning level. LotCraft keeps the saved price instead of silently moving it. Correct the level before trading.
 
-The uninstaller verifies its manifest and removes only LotCraft-owned files. Any unrelated files in the directory are preserved.
+**How long are plans retained?**
 
-## Build from source
+Plans are scoped to the current account, server and chart. MT5 terminal globals expire after four weeks without access. A new chart ID is a different namespace, and the store is not an indefinite archive or a crash-atomic transaction. See [known limitations](docs/KNOWN_LIMITATIONS.md).
 
-Requirements:
+**How do I remove LotCraft?**
 
-- Windows x64
-- MetaTrader 5 with MetaEditor
-- Go 1.23 or newer
-- Python 3.11 or newer
+Run `LotCraft-Uninstall.exe` in `MQL5\Experts\LotCraft` under the chosen terminal data directory. It verifies the installation manifest and removes only the four owned files. It preserves unrelated files.
 
-Run the automated tests:
+## Build and test
+
+Source requirements: Windows x64, MetaEditor, Go 1.23+, Python 3.11+, pytest, Git Bash and a C++17 `g++` compiler. Signed release creation additionally requires the existing Ed25519 private key outside the repository.
+
+From the repository root:
 
 ```powershell
 py -3.11 -m pytest -q
+Set-Location installer
+go test -count=1 ./...
+go test -race -count=1 ./...
+go vet ./...
+Set-Location ..
 ```
 
-Build, verify and optionally install a release:
+To build a signed release without installing into a terminal:
 
 ```powershell
-.\scripts\build_release.ps1 `
-  -MetaEditorPath "C:\Program Files\MetaTrader 5\MetaEditor64.exe"
+.\scripts\build_release.ps1 -MetaEditorPath "C:\Program Files\MetaTrader 5\MetaEditor64.exe"
 ```
 
-For the complete reproducible workflow, see [Build and installation](docs/BUILD_AND_INSTALL.md), [Architecture](docs/ARCHITECTURE.md), and [Test plan](docs/TEST_PLAN.md).
+The tests include executed production-function fixtures and disposable Windows installer tests. Platform stubs do not reproduce MT5's event queue, native drawing or real broker execution. Do not treat skipped native-function tests as equivalent coverage.
 
-## Privacy
+[Architecture](docs/ARCHITECTURE.md) · [Test plan](docs/TEST_PLAN.md) · [Traceability](docs/TRACEABILITY.md) · [Known limitations](docs/KNOWN_LIMITATIONS.md)
 
-The public repository excludes local build output, terminal identifiers, installation logs, generated verification evidence, caches, credentials, private signing keys and environment files. Position sizing and trading remain completely local.
+## Privacy and safety
 
-The updater sends an unauthenticated request to GitHub’s public release API. Its local state contains only check times, a deferred version, and an installation identifier derived from the verified install path. It collects no GitHub token, account information, trading information, or telemetry.
+Position sizing, trading and exposure data stay local. The updater uses GitHub's public release API without a GitHub token. It records check times, deferral and an installation identifier locally; it does not collect account values, trades or telemetry.
+
+Private keys, credentials, terminal identifiers, production logs and local build output are excluded from commits and release assets. Current release evidence uses artifact names and hashes, not local installation paths. Historical release artifacts are not retroactively sanitized by ignore rules.
+
+Trading can lose money. Risk estimates are not guaranteed outcomes. LotCraft enforces validation, but it cannot eliminate execution failures, slippage or market loss.

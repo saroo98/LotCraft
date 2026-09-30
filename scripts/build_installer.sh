@@ -4,25 +4,36 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD="$ROOT/build"
 TMP="$BUILD/.tmp"
-RAW="$TMP/LotCraft-1.2.0-Setup.unstamped.exe"
-FINAL="$BUILD/LotCraft-1.2.0-Setup.exe"
+RAW="$TMP/LotCraft-1.2.1-Setup.unstamped.exe"
+FINAL="$BUILD/LotCraft-1.2.1-Setup.exe"
 PAYLOAD="$ROOT/MQL5/Experts/LotCraft/LotCraft.ex5"
 EMBEDDED="$ROOT/installer/cmd/setup/embedded_payload.txt"
-PLACEHOLDER='Build placeholder. scripts/build_release.ps1 temporarily replaces this file with the compiled LotCraft.ex5 payload.'
+KEY_FILE="$ROOT/installer/update-public-key.txt"
 
 mkdir -p "$TMP"
 if [[ ! -s "$PAYLOAD" ]]; then
   printf 'Missing compiled payload: %s\n' "$PAYLOAD" >&2
   exit 1
 fi
+if [[ ! -f "$KEY_FILE" ]]; then
+  printf 'Missing pinned update public key.\n' >&2
+  exit 1
+fi
+PUBLIC_KEY="$(tr -d '\r\n' < "$KEY_FILE")"
+if [[ ! "$PUBLIC_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+  printf 'Invalid pinned Ed25519 update public key.\n' >&2
+  exit 1
+fi
+EMBEDDED_BACKUP="$(mktemp "$TMP/embedded-payload.XXXXXX")"
+cp "$EMBEDDED" "$EMBEDDED_BACKUP"
+trap 'cp "$EMBEDDED_BACKUP" "$EMBEDDED"; rm -f -- "$EMBEDDED_BACKUP"' EXIT
 cp "$PAYLOAD" "$EMBEDDED"
-trap 'printf "%s\n" "$PLACEHOLDER" > "$EMBEDDED"' EXIT
 (
   cd "$ROOT/installer"
   GOOS=windows GOARCH=amd64 go build \
     -trimpath \
     -buildvcs=false \
-    -ldflags='-s -w -H=windowsgui -buildid=' \
+    -ldflags="-s -w -H=windowsgui -buildid= -X lotcraft.local/installer/internal/update.TrustedPublicKeyBase64=$PUBLIC_KEY" \
     -o "$RAW" \
     ./cmd/setup
 )

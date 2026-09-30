@@ -12,6 +12,6 @@ pytest -q --junitxml=build/pytest-results.xml
   go test -race ./...
   go vet ./...
 )
-./scripts/build_installer.sh
-python3 scripts/stamp_pe_version.py build/LotCraft-1.2.0-Setup.exe build/LotCraft-1.2.0-Setup.exe --verify-only
+# Pytest builds and inspects a disposable installer from the current Go source
+# with a synthetic payload. Offline tests do not need a compiled or signed EA.
 git diff --check

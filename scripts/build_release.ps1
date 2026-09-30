@@ -14,25 +14,25 @@ Set-StrictMode -Version Latest
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Product = "LotCraft"
-$Version = "1.2.0"
+$Version = "1.2.1"
 $Source = Join-Path $ProjectRoot "MQL5\Experts\LotCraft\LotCraft.mq5"
 $CanonicalEx5 = Join-Path $ProjectRoot "MQL5\Experts\LotCraft\LotCraft.ex5"
 $BuildRoot = Join-Path $ProjectRoot "build"
 $CompileRoot = Join-Path $BuildRoot "metaeditor"
 $CompileLog = Join-Path $CompileRoot "LotCraft-compile.log"
-$InstallerSource = Join-Path $BuildRoot "LotCraft-1.2.0-Setup.exe"
+$InstallerSource = Join-Path $BuildRoot "LotCraft-1.2.1-Setup.exe"
 if ([string]::IsNullOrWhiteSpace($ReleaseDirectory)) {
-    $ReleaseDirectory = Join-Path $ProjectRoot "release\LotCraft-1.2.0"
+    $ReleaseDirectory = Join-Path $ProjectRoot "release\LotCraft-1.2.1"
 }
 $ReleaseDirectory = [System.IO.Path]::GetFullPath($ReleaseDirectory)
 $StagedEx5 = Join-Path $ReleaseDirectory "LotCraft.ex5"
-$StagedInstaller = Join-Path $ReleaseDirectory "LotCraft-1.2.0-Setup.exe"
+$StagedInstaller = Join-Path $ReleaseDirectory "LotCraft-1.2.1-Setup.exe"
 $UpdateManifest = Join-Path $ReleaseDirectory "LotCraft-update.json"
 $UpdateSignature = Join-Path $ReleaseDirectory "LotCraft-update.sig"
-$ReleaseChecksum = Join-Path $ReleaseDirectory "LotCraft-1.2.0-SHA256.txt"
+$ReleaseChecksum = Join-Path $ReleaseDirectory "LotCraft-1.2.1-SHA256.txt"
 $UpdatePublicKeyFile = Join-Path $ProjectRoot "installer\update-public-key.txt"
 $EmbeddedEx5 = Join-Path $ProjectRoot "installer\cmd\setup\embedded_payload.txt"
-$RawInstaller = Join-Path $BuildRoot ".tmp\LotCraft-1.2.0-Setup.unstamped.exe"
+$RawInstaller = Join-Path $BuildRoot ".tmp\LotCraft-1.2.1-Setup.unstamped.exe"
 if ([string]::IsNullOrWhiteSpace($UpdateSigningKeyPath)) {
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
         throw "LOCALAPPDATA is unavailable. Supply -UpdateSigningKeyPath explicitly."
@@ -97,7 +97,7 @@ Remove-Item $CompileLog -Force -ErrorAction SilentlyContinue
 Remove-Item $CanonicalEx5 -Force -ErrorAction SilentlyContinue
 
 $compileArgs = @("/compile:`"$Source`"", "/log:`"$CompileLog`"")
-$process = Start-Process -FilePath $MetaEditor -ArgumentList $compileArgs -Wait -PassThru
+$process = Start-Process -FilePath $MetaEditor -ArgumentList $compileArgs -WindowStyle Hidden -Wait -PassThru
 $summary = Get-CompileSummary $CompileLog
 if ($summary.Errors -ne 0 -or $summary.Warnings -ne 0) {
     throw "MetaEditor compile failed acceptance: $($summary.Errors) errors, $($summary.Warnings) warnings. Log: $CompileLog"
@@ -106,6 +106,7 @@ if (-not (Test-Path $CanonicalEx5 -PathType Leaf) -or (Get-Item $CanonicalEx5).L
     throw "MetaEditor reported a clean compile but no nonempty canonical EX5 exists at $CanonicalEx5"
 }
 New-Item -ItemType Directory -Path (Split-Path $RawInstaller) -Force | Out-Null
+$EmbeddedEx5Original = [System.IO.File]::ReadAllBytes($EmbeddedEx5)
 Copy-Item $CanonicalEx5 $EmbeddedEx5 -Force
 try {
     Push-Location (Join-Path $ProjectRoot "installer")
@@ -121,11 +122,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Installer metadata verification failed with exit code $LASTEXITCODE" }
 }
 finally {
-    [System.IO.File]::WriteAllText(
-        $EmbeddedEx5,
-        "Build placeholder. scripts/build_release.ps1 temporarily replaces this file with the compiled LotCraft.ex5 payload.`n",
-        (New-Object System.Text.UTF8Encoding($false))
-    )
+    [System.IO.File]::WriteAllBytes($EmbeddedEx5, $EmbeddedEx5Original)
 }
 
 Copy-Item $CanonicalEx5 $StagedEx5 -Force
@@ -152,7 +149,7 @@ finally { Pop-Location }
 $InstallerDigest = (Get-FileHash $StagedInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
 [System.IO.File]::WriteAllText(
     $ReleaseChecksum,
-    "$InstallerDigest  LotCraft-1.2.0-Setup.exe`n",
+    "$InstallerDigest  LotCraft-1.2.1-Setup.exe`n",
     (New-Object System.Text.UTF8Encoding($false))
 )
 
@@ -174,7 +171,7 @@ if ($Install) {
         throw "-TerminalDataDir is required with -Install. Use the real MT5 data directory containing MQL5."
     }
     $TerminalDataDir = (Resolve-Path $TerminalDataDir -ErrorAction Stop).Path
-    $InstallLog = Join-Path $BuildRoot "LotCraft-1.2.0-install.log"
+    $InstallLog = Join-Path $BuildRoot "LotCraft-1.2.1-install.log"
     # Start-Process joins ArgumentList entries into one command line and does
     # not preserve array element boundaries for values containing spaces.
     # Use quoted -name=value tokens so the Go flag parser receives each path
@@ -186,7 +183,7 @@ if ($Install) {
         "`"-log=$InstallLog`""
     )
     if ($AllowReparse) { $installerArgs += "-allow-reparse" }
-    $installProcess = Start-Process -FilePath $StagedInstaller -ArgumentList $installerArgs -Wait -PassThru
+    $installProcess = Start-Process -FilePath $StagedInstaller -ArgumentList $installerArgs -WindowStyle Hidden -Wait -PassThru
     if ($installProcess.ExitCode -ne 0) {
         throw "Installer returned exit code $($installProcess.ExitCode). Log: $InstallLog"
     }

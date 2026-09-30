@@ -130,6 +130,6 @@ The tests include executed production-function fixtures and disposable Windows i
 
 Position sizing, trading and exposure data stay local. The updater uses GitHub's public release API without a GitHub token. It records check times, deferral and an installation identifier locally; it does not collect account values, trades or telemetry.
 
-Private keys, credentials, terminal identifiers, production logs and local build output are excluded from commits and release assets. Current release evidence uses artifact names and hashes, not local installation paths. Historical release artifacts are not retroactively sanitized by ignore rules.
+Private keys, credentials, terminal identifiers, production logs and local build output are excluded from commits and release assets. Current release evidence uses artifact names and hashes, not local installation paths. The v1.2.0 verification report was separately path-redacted with owner approval; its installer and signed update assets are unchanged. Ignore rules do not sanitize previously published material or remove cached copies.
 
 Trading can lose money. Risk estimates are not guaranteed outcomes. LotCraft enforces validation, but it cannot eliminate execution failures, slippage or market loss.

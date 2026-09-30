@@ -86,7 +86,7 @@ The release script:
 10. Verifies the signature and installer descriptor.
 11. Writes release verification evidence. Public output must contain artifact roles, names and hashes, not absolute workspace or terminal paths.
 
-Generated binaries and logs are excluded from Git. Inspect every asset before publication: ignore rules do not sanitize release uploads. The historical v1.2.0 public report contains absolute workspace paths and is unchanged by the no-publication audit.
+Generated binaries and logs are excluded from Git. Inspect every asset before publication: ignore rules do not sanitize release uploads. With explicit owner approval, the v1.2.0 verification report was separately replaced with an artifact-name-only copy on 2026-09-30. Its installer, checksum, signed metadata and signature are unchanged. The [1.2.1 release report](RELEASE_1.2.1.md) records the comparison; cached historical copies are outside this repair.
 
 ## Compile, install and verify a local terminal
 

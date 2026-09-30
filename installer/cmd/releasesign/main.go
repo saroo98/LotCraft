@@ -11,10 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
-	"os/user"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	lotupdate "lotcraft.local/installer/internal/update"
@@ -50,10 +47,23 @@ func generate(arguments []string) error {
 	if *privatePath == "" || *publicPath == "" {
 		return errors.New("-private-key and -public-key are required")
 	}
-	if _, err := os.Stat(*privatePath); err == nil {
-		return fmt.Errorf("refusing to overwrite existing private key %s", *privatePath)
-	} else if !errors.Is(err, os.ErrNotExist) {
+	privateAbs, err := filepath.Abs(*privatePath)
+	if err != nil {
 		return err
+	}
+	publicAbs, err := filepath.Abs(*publicPath)
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(privateAbs, publicAbs) {
+		return errors.New("private and public key outputs must be distinct files")
+	}
+	for _, path := range []string{privateAbs, publicAbs} {
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("refusing to overwrite existing key output %s", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
@@ -63,7 +73,7 @@ func generate(arguments []string) error {
 	if err := writePrivateKey(*privatePath, privateKey); err != nil {
 		return err
 	}
-	if err := writeTextFile(*publicPath, base64.StdEncoding.EncodeToString(publicKey)+"\n", 0o644); err != nil {
+	if err := writeNewTextFile(*publicPath, base64.StdEncoding.EncodeToString(publicKey)+"\n", 0o644); err != nil {
 		_ = os.Remove(*privatePath)
 		return err
 	}
@@ -171,23 +181,41 @@ func readPrivateKey(path string) (ed25519.PrivateKey, error) {
 }
 
 func writePrivateKey(path string, privateKey ed25519.PrivateKey) error {
-	if err := writeTextFile(path, base64.StdEncoding.EncodeToString(privateKey)+"\n", 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-	current, err := user.Current()
+	file, err := newPrivateKeyFile(path)
 	if err != nil {
-		_ = os.Remove(path)
-		return fmt.Errorf("resolve current Windows user: %w", err)
+		return err
 	}
-	command := exec.Command("icacls", path, "/inheritance:r", "/grant:r", current.Username+":(R,W)")
-	if output, err := command.CombinedOutput(); err != nil {
-		_ = os.Remove(path)
-		return fmt.Errorf("restrict private-key ACL: %w: %s", err, strings.TrimSpace(string(output)))
+	return finishNewTextFile(file, base64.StdEncoding.EncodeToString(privateKey)+"\n")
+}
+
+func writeNewTextFile(path, value string, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
 	}
-	return nil
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	return finishNewTextFile(file, value)
+}
+
+func finishNewTextFile(file *os.File, value string) (err error) {
+	defer func() {
+		_ = file.Close()
+		if err != nil {
+			_ = os.Remove(file.Name())
+		}
+	}()
+	if _, err = file.WriteString(value); err != nil {
+		return err
+	}
+	if err = file.Sync(); err != nil {
+		return err
+	}
+	return file.Close()
 }
 
 func writeTextFile(path, value string, mode os.FileMode) error {

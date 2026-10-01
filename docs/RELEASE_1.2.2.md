@@ -40,7 +40,11 @@ The intended public inventory contains the setup, versioned checksum, signed JSO
 
 ## Publication status
 
-Local release gates pass. Commit, push, publication and public-download verification are the next steps. No production installation, MT5 runtime acceptance or universal notification claim is made.
+[LotCraft 1.2.2](https://github.com/saroo98/LotCraft/releases/tag/v1.2.2) was published as the latest stable release at 2026-10-01T10:02:16Z. Three meaningful commits cover copy fixes, version identity and audit/release documentation. Both remote main and the feature branch matched verified code commit `4b83bdfee7f43025c629c09c335a056e0abb889e`; the annotated release tag peels to that commit. A subsequent documentation-only commit records these public verification results without moving the tag.
+
+All five uploaded assets have matching GitHub digests and sizes. Fresh public-release downloads also match the verified local files byte-for-byte by SHA-256 and size. An uncached temporary integration test passed using the actual production Checker, the pinned public key, the production HTTPS host allowlist and anonymous requests. It verified the signed 1.2.2 candidate and downloaded installer for current version 1.2.1, then confirmed that current version 1.2.2 has no update. The temporary network test was removed after verification; normal unit tests remain offline.
+
+The separate dirty checkout remains unchanged. No production installation, MT5 runtime acceptance or universal notification claim is made.
 
 ## Delivery limits
 

@@ -1,11 +1,11 @@
-# LotCraft 1.2.1 Build and Installation
+# LotCraft 1.2.2 Build and Installation
 
 ## End-user installation
 
 The release contains one self-contained Windows x64 installer:
 
 ```text
-LotCraft-1.2.1-Setup.exe
+LotCraft-1.2.2-Setup.exe
 ```
 
 1. Download the installer from the latest GitHub Release.
@@ -81,7 +81,7 @@ The release script:
 5. Restores the exact prebuild embedded payload source bytes.
 6. Stamps and verifies Windows version metadata.
 7. Embeds the pinned Ed25519 public key in the installer/updater.
-8. Stages the installer and EX5 under `release\LotCraft-1.2.1`.
+8. Stages the installer and EX5 under `release\LotCraft-1.2.2`.
 9. Signs the exact final installer metadata as `LotCraft-update.json` and `LotCraft-update.sig`.
 10. Verifies the signature and installer descriptor.
 11. Writes release verification evidence. Public output must contain artifact roles, names and hashes, not absolute workspace or terminal paths.
@@ -90,7 +90,7 @@ Generated binaries and logs are excluded from Git. Inspect every asset before pu
 
 ## Compile, install and verify a local terminal
 
-Use a real MT5 terminal data directory, meaning the directory that contains `MQL5`, `config`, `bases`, or another normal terminal marker:
+Use the real MT5 terminal data directory, not its `MQL5` subfolder. The installer requires at least one normal terminal-data marker: `config`, `bases`, `history`, `logs`, or `origin.txt`. An empty `MQL5` directory alone is not sufficient:
 
 ```powershell
 .\scripts\build_release.ps1 `
@@ -124,7 +124,7 @@ The signed JSON records the schema, product, stable semantic version, tag, insta
 The self-contained installer is the normal end-user path. For release engineering only, an explicit canonical payload can override the embedded payload:
 
 ```powershell
-.\LotCraft-1.2.1-Setup.exe `
+.\LotCraft-1.2.2-Setup.exe `
   -terminal-data-dir "C:\path\to\terminal\data" `
   -payload "C:\path\to\LotCraft.ex5" `
   -quiet

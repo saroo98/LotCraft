@@ -1,6 +1,6 @@
-# LotCraft 1.2.1 known limitations
+# LotCraft 1.2.2 known limitations
 
-Current release status and evidence are in [the 1.2.1 report](RELEASE_1.2.1.md). The [September 30 audit](AUDIT_2026-09-30.md) and [earlier verification report](AUDIT_VERIFICATION_2026-09-09.md) record pre-release snapshots. Screenshots, installations and completion reports do not prove native behavior in MT5.
+Current release status and evidence are in [the 1.2.2 report](RELEASE_1.2.2.md). The [copy audit](COPY_AUDIT_2026-10-01.md), [September 30 audit](AUDIT_2026-09-30.md) and [earlier verification report](AUDIT_VERIFICATION_2026-09-09.md) record earlier snapshots. Screenshots, installations and completion reports do not prove native behavior in MT5.
 
 1. Native runtime acceptance is pending. This audit does not control the desktop, launch MT5, place trades or alter production installations. Hyper-V inventory is permission-blocked. Offline function tests and compilation do not prove actual rendering, UTF-16 handling, mouse capture, DLL integration, restart persistence, multi-chart behavior or broker execution.
 2. DLL permission is mandatory. Initialization requires Windows integration for clipboard, native order-dialog access and pointer-release recovery. Strategy Tester does not launch the updater.
@@ -16,5 +16,7 @@ Current release status and evidence are in [the 1.2.1 report](RELEASE_1.2.1.md).
 12. Base panel dimensions are Full 438x547, Compact 372x492 and Mini 360x92. Scaling bottoms out at 0.82. Approximate minimum panel sizes are 359x449, 305x403 and 295x75, plus a desired 8px chart margin. Smaller charts need a separate overflow design. Long displayed values may be abbreviated; focused numeric text scrolls within its field.
 13. Public report generation uses artifact names, not private paths. With explicit owner approval, only the old v1.2.0 verification report was replaced on 2026-09-30: seven local-path fields were redacted without changing non-path evidence. Its installer, checksum, signed metadata and signature are unchanged. Cached historical copies cannot be withdrawn by this repair. Historical images are not current UI evidence. Existing orphaned updater temporary directories are not swept or deleted by this release.
 14. Plans remain scoped to account/server/chart. Terminal globals expire after four weeks without access and are not an indefinite archive; a different chart ID cannot read another chart's namespace. Partial-write/crash recovery is unproven. Handle separation preserves true prices rather than widening a saved SL. If an extremely narrow chart has no safe exposure-label lane, the details list remains available instead of labels covering controls.
+
+15. C buttons copy Entry, SL, TP and calculated volume. Ctrl+C copies selected raw numeric editor text without committing it. Canvas-only readouts have no copy action. Windows clipboard contention and DLL/policy restrictions can still prevent copying; generic transfer failures are logged in Experts. Real MT5 keyboard delivery and native UTF-16 round trips remain unverified because safe private-station tests skip here.
 
 These limits are not claims that all other behavior is defect-free. Review the audit's findings, tests and external dependencies before deployment.

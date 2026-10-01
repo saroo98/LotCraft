@@ -35,27 +35,24 @@ If the budget is below the broker's minimum lot size, LotCraft can use the minim
 
 Chart/account exposure uses current **equity**, even when new-trade sizing uses Balance or Manual. It sums downside only; profitable stops do not cancel other positions' losses. Projections include known accrued swap for positions, but cannot guarantee fills or predict gaps, slippage, future swap or unknown closing fees. A missing SL is not zero risk.
 
-## What's new in 1.2.1
+## What's new in 1.2.2
 
-- Preserve symbol-specific SL plans when switching away and returning on the same chart.
-- Keep SL/TP prices fixed through repeated Instant/Pending changes.
-- Separate nearby planning handles without changing the saved prices.
-- Keep planning controls available for restricted symbols and improve session-data handling.
-- Harden exposure completeness, numeric text fit, render recovery and explicit Full-mode choices.
-- Strengthen installer ownership, rollback error reporting, updater cleanup and release-evidence privacy.
-- Provide recurring detached update-check opportunities while the EA remains attached.
+- Copy selected numeric text with **Ctrl+C**, including SL, risk percentage, Target risk and Manual account fields.
+- Keep C-button prices consistent with the displayed planning value instead of normalizing them again.
+- Reject unavailable clipboard owners before clearing existing clipboard contents.
+- Clear stale success feedback after failed copies and log generic failure reasons without financial values.
 
-The [audit and implementation plan](docs/AUDIT_2026-09-30.md) records the fixes and proof boundaries. The [1.2.1 release report](docs/RELEASE_1.2.1.md) records final build and publication evidence. Offline verification is not native MT5 visual or broker certification.
+The [copy audit](docs/COPY_AUDIT_2026-10-01.md) records the fixes and proof boundaries. The [1.2.2 release report](docs/RELEASE_1.2.2.md) records build and publication evidence. The [1.2.1 report](docs/RELEASE_1.2.1.md) retains the earlier planning, layout and updater improvements. Offline verification is not native MT5 visual or broker certification.
 
 ## Install LotCraft
 
 Requirements: **Windows x64, MetaTrader 5, and permission to enable DLL imports for LotCraft**.
 
 1. Open the [latest stable GitHub release](https://github.com/saroo98/LotCraft/releases/latest).
-2. Download `LotCraft-1.2.1-Setup.exe` and its `LotCraft-1.2.1-SHA256.txt` checksum.
+2. Download `LotCraft-1.2.2-Setup.exe` and its `LotCraft-1.2.2-SHA256.txt` checksum.
 3. Compare the installer SHA-256 with the published checksum:
    ```powershell
-   Get-FileHash .\LotCraft-1.2.1-Setup.exe -Algorithm SHA256
+   Get-FileHash .\LotCraft-1.2.2-Setup.exe -Algorithm SHA256
    ```
 4. Run the installer and confirm the intended MT5 terminal data directory. No separate EX5 download or manual folder copying is needed.
 5. In MT5, refresh **Navigator → Expert Advisors**, then attach **LotCraft → LotCraft** to a chart.
@@ -75,7 +72,7 @@ Starting with **1.2.1**, LotCraft launches its separate updater ten seconds afte
 
 When a newer stable signed release is available, the updater asks **Yes / No**. Yes downloads and verifies the signed metadata, installer byte size and SHA-256 before installation. No defers that version for 24 hours. The new EA activates after reattachment or a later MT5 restart.
 
-**Updating from 1.2.0:** reattach LotCraft or restart MT5 for the next eligible check, or install 1.2.1 manually. The old EA only launches its updater after initialization; publishing a release cannot remotely add a scheduler to that old binary.
+**Updating from 1.2.0:** reattach LotCraft or restart MT5 for the next eligible check, or install the latest version manually. The old EA only launches its updater after initialization; publishing a release cannot remotely add a scheduler to that old binary.
 
 Check timing is not a universal notification deadline. MT5 must be running, the EA must be attached, DLL imports must be allowed, the installation must verify, and the network must be available. A due daily attempt may wait for the next hourly opportunity. Strategy Tester never launches update checks. Updates never restart MT5 or place trades.
 

@@ -78,9 +78,9 @@ bool PS_PlatformClipboardSet(const string text,string &error)
      }
 
    long raw_handle=0;
-   if(!ChartGetInteger(ChartID(),CHART_WINDOW_HANDLE,0,raw_handle))
+   if(!ChartGetInteger(ChartID(),CHART_WINDOW_HANDLE,0,raw_handle) || raw_handle==0)
      {
-      error=StringFormat("Cannot obtain chart window handle (error %d).",GetLastError());
+      error=StringFormat("Cannot obtain a valid chart window handle (error %d).",GetLastError());
       return(false);
      }
 

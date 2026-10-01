@@ -4,6 +4,7 @@ These tests catch stale financial output and lost selection replacement. They
 do not emulate MT5's event queue, canvas renderer, broker, or DLL integration.
 """
 from native_mql_harness import compile_and_run, extract_functions
+from test_native_ui import declaration
 
 EA = "MQL5/Experts/LotCraft/LotCraft.mq5"
 EDITOR = "MQL5/Experts/LotCraft/PS_Editor.mqh"
@@ -102,7 +103,7 @@ def test_waiting_panel_cannot_activate_stale_keyboard_focus(tmp_path):
 #include <string>
 #include <cassert>
 using string=std::string;
-enum PSEditKeyResult {PS_EDIT_KEY_NONE,PS_EDIT_KEY_CHANGED,PS_EDIT_KEY_COMMIT,PS_EDIT_KEY_CANCEL};
+''' + declaration(EDITOR, "PSEditKeyResult") + r'''
 const int PS_CTRL_NONE=-1,PS_CTRL_COUNT=40;
 bool g_initialized=true,g_symbol_transition_pending=true;
 bool g_ps_panel_render_ready=true;
@@ -111,7 +112,7 @@ bool g_exposure_details_dirty=false,g_exposure_labels_dirty=false;
 bool g_ps_control_visible[PS_CTRL_COUNT]={};
 int g_keyboard_focus=1,actions=0,tabs=0;
 struct UI {bool dirty=false;} g_ui;
-struct Editor {bool active=false;} g_editor;
+struct PSEditorState {bool active=false,has_selection=false;string raw_text;int cursor=0,anchor=0;} g_editor;
 struct ExposureUI {bool details_open=false;} g_exposure_ui;
 int g_model=0,g_market=0;
 void PS_KeyboardFocusNext(bool) {++tabs;}
@@ -120,18 +121,25 @@ void PS_SaveState() {}
 void PS_RenderIfDirty() {}
 void PS_Action(int) {++actions;}
 void PS_UIGuardEnter(UI&) {}
-PSEditKeyResult PS_EditorKey(Editor&,int,bool,bool) {return PS_EDIT_KEY_NONE;}
-void PS_EditorApplyRaw(Editor&,int&,int,bool,string&) {}
+PSEditKeyResult PS_EditorKey(PSEditorState&,int,bool,bool) {return PS_EDIT_KEY_NONE;}
+void PS_EditorApplyRaw(PSEditorState&,int&,int,bool,string&) {}
 void PS_ClearTransientStatus() {}
 void PS_Recalculate(bool) {}
 bool PS_CommitEditor() {return true;}
+int MathMin(int a,int b){return a<b?a:b;}int MathMax(int a,int b){return a>b?a:b;}
+string StringSubstr(const string &s,int p,int n){return s.substr(p,n);}
+int copies=0;bool PS_CopyText(const string&,const string&){++copies;return true;}
 '''
+    source += extract_functions(EDITOR, "PS_EditorSelectionStart", "PS_EditorSelectionEnd")
     source += extract_functions(EA, "PS_HandleKeyDown")
     source += r'''
 int main() {
   g_ps_control_visible[1]=true;
   PS_HandleKeyDown(13); PS_HandleKeyDown(9);
   assert(actions==0 && tabs==0);
+  g_editor.active=true;g_editor.has_selection=true;g_editor.raw_text="1.12345";g_editor.cursor=7;
+  PS_HandleKeyDown(17);PS_HandleKeyDown(67);assert(copies==0);
+  g_editor.active=false;
   g_symbol_transition_pending=false;
   PS_HandleKeyDown(13); assert(actions==1);
   g_ps_control_visible[1]=false;

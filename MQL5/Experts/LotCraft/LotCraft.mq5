@@ -416,24 +416,30 @@ bool PS_CopyText(const string text,const string description)
       PS_SetStatus(description+" copied to the clipboard.",false,3000);
       return(true);
      }
+   g_copy_feedback_control=PS_CTRL_NONE;
+   g_copy_feedback_until_ms=0;
    PS_SetStatus(error,true,6000);
+   PS_LogWarningRateLimited("clipboard.copy",error,5000);
    return(false);
   }
 
 void PS_DoCopy(const PSControlId control)
   {
+   g_copy_feedback_control=PS_CTRL_NONE;
+   g_copy_feedback_until_ms=0;
+   g_ui.dirty=true;
    bool copied=false;
    if(control==PS_CTRL_ENTRY_COPY)
      {
       double value=(g_model.order_mode==PS_ORDER_INSTANT && g_market.tick_valid)
                    ? (g_model.direction==PS_DIRECTION_LONG ? g_market.tick.ask : g_market.tick.bid)
                    : g_model.entry;
-      copied=PS_CopyText(PS_PriceText(PS_NormalizePrice(value,g_market),g_market),"Entry");
+      copied=PS_CopyText(PS_PriceText(value,g_market),"Entry");
      }
    else if(control==PS_CTRL_STOP_COPY)
-      copied=PS_CopyText(PS_PriceText(PS_NormalizePrice(g_model.stop_loss,g_market),g_market),"Stop-loss");
+      copied=PS_CopyText(PS_PriceText(g_model.stop_loss,g_market),"Stop-loss");
    else if(control==PS_CTRL_TAKE_COPY)
-      copied=PS_CopyText(PS_PriceText(PS_IsPositiveFinite(g_model.take_profit) ? PS_NormalizePrice(g_model.take_profit,g_market) : 0.0,g_market),"Take-profit");
+      copied=PS_CopyText(PS_PriceText(PS_IsPositiveFinite(g_model.take_profit) ? g_model.take_profit : 0.0,g_market),"Take-profit");
    else if(control==PS_CTRL_POSITION_COPY)
      {
       if(!g_calc.sizing_available)
@@ -1390,6 +1396,12 @@ void PS_HandleKeyDown(const int key)
      }
    else if(result==PS_EDIT_KEY_COMMIT) PS_CommitEditor();
    else if(result==PS_EDIT_KEY_CANCEL) PS_CancelEditor();
+   else if(result==PS_EDIT_KEY_COPY && g_editor.has_selection)
+     {
+      int first=PS_EditorSelectionStart(g_editor);
+      int length=PS_EditorSelectionEnd(g_editor)-first;
+      if(length>0) PS_CopyText(StringSubstr(g_editor.raw_text,first,length),"Selection");
+     }
    g_ui.dirty=true;
    PS_RenderIfDirty();
   }

@@ -8,7 +8,8 @@ enum PSEditKeyResult
    PS_EDIT_KEY_NONE=0,
    PS_EDIT_KEY_CHANGED=1,
    PS_EDIT_KEY_COMMIT=2,
-   PS_EDIT_KEY_CANCEL=3
+   PS_EDIT_KEY_CANCEL=3,
+   PS_EDIT_KEY_COPY=4
   };
 
 void PS_EditorReset(PSEditorState &editor)
@@ -324,6 +325,7 @@ PSEditKeyResult PS_EditorKey(PSEditorState &editor,const int key,const bool shif
       PS_EditorSelectAll(editor);
       return(PS_EDIT_KEY_NONE);
      }
+   if(ctrl_down && key==67) return(PS_EDIT_KEY_COPY);
 
    if(key==37)
      {

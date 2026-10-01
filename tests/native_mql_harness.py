@@ -70,7 +70,7 @@ def extract_functions(source_rel: str | Path, *names: str) -> str:
     return "\n\n".join(extract_function(source_rel, name) for name in names)
 
 
-def compile_and_run(tmp_path: Path, source_string: str) -> str:
+def compile_and_run(tmp_path: Path, source_string: str, *, link_args: tuple[str, ...] = ()) -> str:
     compiler = shutil.which("g++")
     if compiler is None:
         pytest.skip("Native production-function tests require g++ on PATH; MT5 behavior remains unverified")
@@ -78,7 +78,7 @@ def compile_and_run(tmp_path: Path, source_string: str) -> str:
     executable = tmp_path / "native_fixture.exe"
     source.write_text(source_string, encoding="utf-8")
     build = subprocess.run(
-        [compiler, "-std=c++17", "-O0", "-Wall", "-Wextra", str(source), "-o", str(executable)],
+        [compiler, "-std=c++17", "-O0", "-Wall", "-Wextra", str(source), "-o", str(executable), *link_args],
         capture_output=True,
         text=True,
         timeout=60,

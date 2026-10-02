@@ -35,24 +35,24 @@ If the budget is below the broker's minimum lot size, LotCraft can use the minim
 
 Chart/account exposure uses current **equity**, even when new-trade sizing uses Balance or Manual. It sums downside only; profitable stops do not cancel other positions' losses. Projections include known accrued swap for positions, but cannot guarantee fills or predict gaps, slippage, future swap or unknown closing fees. A missing SL is not zero risk.
 
-## What's new in 1.2.2
+## What's new in 1.2.3
 
-- Copy selected numeric text with **Ctrl+C**, including SL, risk percentage, Target risk and Manual account fields.
-- Keep C-button prices consistent with the displayed planning value instead of normalizing them again.
-- Reject unavailable clipboard owners before clearing existing clipboard contents.
-- Clear stale success feedback after failed copies and log generic failure reasons without financial values.
+- Read the current Ctrl/Shift state for each key event, so missed modifier events do not disable shortcuts or leave selection stuck.
+- Add **Ctrl+V** numeric paste, **Ctrl+X** cut, **Ctrl+Z** undo and **Ctrl+Y** redo, while retaining numeric validation and C buttons.
+- Support standard selection, clipboard aliases, navigation and deletion without recalculating for no-op edits.
+- Include editable Manual account money in Tab/Shift+Tab traversal. Clipboard failures preserve the field and never log copied or pasted values.
 
-The [copy audit](docs/COPY_AUDIT_2026-10-01.md) records the fixes and proof boundaries. The [1.2.2 release report](docs/RELEASE_1.2.2.md) records build and publication evidence. The [1.2.1 report](docs/RELEASE_1.2.1.md) retains the earlier planning, layout and updater improvements. Offline verification is not native MT5 visual or broker certification.
+The [keyboard audit](docs/KEYBOARD_AUDIT_2026-10-02.md) records the fixes and proof boundaries. The [1.2.3 release report](docs/RELEASE_1.2.3.md) records build, installation and publication evidence. The [1.2.2 report](docs/RELEASE_1.2.2.md) and [1.2.1 report](docs/RELEASE_1.2.1.md) retain earlier changes. Native MT5 shortcut delivery and clipboard marshalling remain unverified here; offline verification is not native UI or broker certification.
 
 ## Install LotCraft
 
 Requirements: **Windows x64, MetaTrader 5, and permission to enable DLL imports for LotCraft**.
 
 1. Open the [latest stable GitHub release](https://github.com/saroo98/LotCraft/releases/latest).
-2. Download `LotCraft-1.2.2-Setup.exe` and its `LotCraft-1.2.2-SHA256.txt` checksum.
+2. Download `LotCraft-1.2.3-Setup.exe` and its `LotCraft-1.2.3-SHA256.txt` checksum.
 3. Compare the installer SHA-256 with the published checksum:
    ```powershell
-   Get-FileHash .\LotCraft-1.2.2-Setup.exe -Algorithm SHA256
+   Get-FileHash .\LotCraft-1.2.3-Setup.exe -Algorithm SHA256
    ```
 4. Run the installer and confirm the intended MT5 terminal data directory. No separate EX5 download or manual folder copying is needed.
 5. In MT5, refresh **Navigator → Expert Advisors**, then attach **LotCraft → LotCraft** to a chart.

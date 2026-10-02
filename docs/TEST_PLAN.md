@@ -75,6 +75,18 @@ Test every editable field:
 7. Quote updates while editing do not steal focus or overwrite raw text.
 8. Repeated entry and exit leaves no duplicate caret, selection, edit rectangle, or residual object.
 
+For the 1.2.3 keyboard fixes described in [the 2026-10-02 audit](KEYBOARD_AUDIT_2026-10-02.md), additionally test:
+
+9. Hold Ctrl before focusing the chart; select with Ctrl+A, double-click or dragging, then Ctrl+C. Missing modifier releases must not leave subsequent letters acting as shortcuts.
+10. Ctrl+V/Shift+Insert replace selections or insert at the cursor. Use plain numeric text, including decimal point/comma and surrounding whitespace. Reject currency prefixes, thousands separators, multiline payloads, invalid grammar and overlength replacements without changing the field.
+11. Ctrl+X/Shift+Delete remove a selection only after successful copy. Ctrl+Insert is the copy alias. No selection must leave the clipboard unchanged.
+12. Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z restore text, caret and selection within the current field session. Keep only the latest 31 changes; clear history on commit, cancel or a new field. A new edit after undo clears redo.
+13. Ctrl+arrows and Ctrl+Backspace/Delete treat a numeric field as one token. Home/End and Up/Down move to its boundaries. Shift extends selection. Numeric keypad input uses the terminal's keyboard-layout translation.
+    Also clear SL, paste another value, then undo to the empty field. Its calculated preview must restore the prior value. Repeat in Manual account and both risk fields, including a change of risk authority; undo must not retain the later value or alter unrelated settings.
+14. Tab/Shift+Tab include editable Manual account money and skip its read-only Balance/Equity value. Shift+Tab from no focus begins at the last visible control. Enter commits and Escape restores the original model without placing a trade while editing.
+
+These additions are local source behavior until separately packaged and deployed; they do not retroactively change the published 1.2.2 binary.
+
 ## 6. Manual chart interaction matrix
 
 1. Single click, double-click, and drag each owned horizontal line. Price must not change.

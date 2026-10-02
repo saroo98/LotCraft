@@ -28,8 +28,8 @@ var embeddedEX5 []byte
 
 const (
 	productName       = "LotCraft"
-	productVersion    = "1.2.2"
-	setupTitle        = "LotCraft 1.2.2 Setup"
+	productVersion    = "1.2.3"
+	setupTitle        = "LotCraft 1.2.3 Setup"
 	ex5Name           = "LotCraft.ex5"
 	updaterName       = "LotCraft-Updater.exe"
 	uninstallName     = "LotCraft-Uninstall.exe"
@@ -154,7 +154,7 @@ func main() {
 	}
 	logPath := opt.logPath
 	if logPath == "" {
-		logPath = filepath.Join(os.TempDir(), "LotCraft-1.2.2-install.log")
+		logPath = filepath.Join(os.TempDir(), "LotCraft-1.2.3-install.log")
 	}
 	log, err := newLogger(logPath, opt.quiet)
 	if err != nil {
@@ -445,7 +445,7 @@ func runInstall(opt options, log *logger) error {
 	log.printf("hash canonical_ex5=%s staged_ex5=%s installed_ex5=%s installer=%s updater=%s", canonicalHash, stagedHash, installedHash, installerHash, updaterHash)
 	if !opt.quiet {
 		showMessage(setupTitle,
-			"LotCraft 1.2.2 was installed successfully.\n\nFinal destination:\n"+installedResolved+"\n\nSHA-256:\n"+installedHash+"\n\nRestart MetaTrader 5 or refresh the Navigator before attaching the EA.",
+			"LotCraft 1.2.3 was installed successfully.\n\nFinal destination:\n"+installedResolved+"\n\nSHA-256:\n"+installedHash+"\n\nRestart MetaTrader 5 or refresh the Navigator before attaching the EA.",
 			mbOK|mbIconInformation|mbSetForeground)
 	}
 	return nil
@@ -566,7 +566,7 @@ func runUninstall(opt options, log *logger) error {
 	}
 
 	if !opt.quiet {
-		message := "Remove LotCraft 1.2.2 from:\n" + currentProductResolved + "\n\nOnly the four installer-owned files will be removed. Unrelated files will be preserved."
+		message := "Remove LotCraft 1.2.3 from:\n" + currentProductResolved + "\n\nOnly the four installer-owned files will be removed. Unrelated files will be preserved."
 		if showMessage(setupTitle, message, mbYesNo|mbIconQuestion|mbSetForeground) != idYes {
 			return errors.New("uninstall cancelled")
 		}
@@ -609,7 +609,7 @@ func runUninstall(opt options, log *logger) error {
 	cleanupPending := sameWindowsPath(uninstallerPath, self)
 	log.printf("uninstall payload removal complete product_dir=%s self_cleanup_pending=%t", currentProductResolved, cleanupPending)
 	if !opt.quiet {
-		status := "LotCraft 1.2.2 owned files were removed."
+		status := "LotCraft 1.2.3 owned files were removed."
 		if cleanupPending {
 			status = "The LotCraft EA and updater were removed.\n\nClose this dialog to let the uninstaller remove its own file. Cleanup failures are recorded in the local LotCraft updater logs."
 		}

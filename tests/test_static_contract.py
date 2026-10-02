@@ -55,11 +55,11 @@ def test_product_identity_is_consistent():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     assert '#property copyright "LotCraft"' in main
     # MetaEditor accepts only a two-part numeric #property version. The
-    # user-facing semantic release is 1.2.2 while persistence remains schema v100.
-    assert '#property version   "1.22"' in main
-    assert '#property description "LotCraft 1.2.2"' in main
+    # user-facing semantic release is 1.2.3 while persistence remains schema v100.
+    assert '#property version   "1.23"' in main
+    assert '#property description "LotCraft 1.2.3"' in main
     assert '#define PS_PRODUCT_NAME              "LotCraft"' in types
-    assert '#define PS_VERSION_TEXT              "1.2.2"' in types
+    assert '#define PS_VERSION_TEXT              "1.2.3"' in types
     assert '#define PS_SOURCE_NAME               "LotCraft.mq5"' in types
     assert '#define PS_BINARY_NAME               "LotCraft.ex5"' in types
     assert '#define PS_LOG_PREFIX                "LotCraft"' in types
@@ -1121,7 +1121,7 @@ def test_release_source_uses_metaeditor_compatible_constant_forms():
     main = MAIN.read_text(encoding="utf-8")
     logging = (SRC / "PS_Logging.mqh").read_text(encoding="utf-8")
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
-    assert '#property version   "1.22"' in main
+    assert '#property version   "1.23"' in main
     assert not re.search(r"(?m)^\s*#if\s+(?!def\b|ndef\b)", logging)
     assert "const color text_color=C'154,164,181'" in ui
 

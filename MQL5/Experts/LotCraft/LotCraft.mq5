@@ -1,8 +1,8 @@
 #property strict
 #property copyright "LotCraft"
 #property link      ""
-#property version   "1.22"
-#property description "LotCraft 1.2.2"
+#property version   "1.23"
+#property description "LotCraft 1.2.3"
 #property description "Discretionary position sizing and explicit MT5 order entry assistant."
 
 #include "PS_Platform.mqh"
@@ -1318,27 +1318,30 @@ void PS_HandleMouseEvent(const int x,const int y,const uint mask)
 
 void PS_KeyboardFocusNext(const bool reverse)
   {
-   PSControlId order[9];
+   PSControlId order[10];
    order[0]=PS_CTRL_ENTRY_FIELD;
    order[1]=PS_CTRL_STOP_FIELD;
    order[2]=PS_CTRL_TAKE_FIELD;
-   order[3]=PS_CTRL_RISK_PERCENT_FIELD;
-   order[4]=PS_CTRL_RISK_MONEY_FIELD;
-   order[5]=PS_CTRL_CONFIRM;
-   order[6]=PS_CTRL_MOVE_SLS;
-   order[7]=PS_CTRL_EXPOSURE_SUMMARY;
-   order[8]=PS_CTRL_TRADE;
+   order[3]=PS_CTRL_ACCOUNT_FIELD;
+   order[4]=PS_CTRL_RISK_PERCENT_FIELD;
+   order[5]=PS_CTRL_RISK_MONEY_FIELD;
+   order[6]=PS_CTRL_CONFIRM;
+   order[7]=PS_CTRL_MOVE_SLS;
+   order[8]=PS_CTRL_EXPOSURE_SUMMARY;
+   order[9]=PS_CTRL_TRADE;
    if(g_editor.active && !PS_CommitEditor()) return;
    int current=-1;
-   for(int i=0;i<9;i++) if(order[i]==g_keyboard_focus) current=i;
-   for(int step=1;step<=9;step++)
+   for(int i=0;i<10;i++) if(order[i]==g_keyboard_focus) current=i;
+   if(reverse && current<0) current=0;
+   for(int step=1;step<=10;step++)
      {
       int index=(reverse ? current-step : current+step);
-      while(index<0) index+=9;
-      index%=9;
+      while(index<0) index+=10;
+      index%=10;
       PSControlId candidate=order[index];
       if(candidate==PS_CTRL_ENTRY_FIELD && g_model.order_mode==PS_ORDER_INSTANT) continue;
       if(candidate<0 || candidate>=PS_CTRL_COUNT || !g_ps_control_visible[(int)candidate]) continue;
+      if(candidate==PS_CTRL_ACCOUNT_FIELD && !PS_UIControlIsEditable(candidate,g_model)) continue;
       g_keyboard_focus=candidate;
       PSFieldId field=PS_UIFieldForControl(candidate);
       if(field!=PS_FIELD_NONE && PS_UIControlIsEditable(candidate,g_model))
@@ -1356,8 +1359,12 @@ void PS_KeyboardFocusNext(const bool reverse)
 void PS_HandleKeyDown(const int key)
   {
    if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready) return;
-   if(key==16) g_shift_down=true;
-   if(key==17) g_ctrl_down=true;
+   // Modifiers can already be held when this chart receives focus. Do not
+   // require a preceding modifier event or retain a missed release event.
+   g_shift_down=((TerminalInfoInteger(TERMINAL_KEYSTATE_SHIFT) & 0x8000)!=0);
+   g_ctrl_down=((TerminalInfoInteger(TERMINAL_KEYSTATE_CONTROL) & 0x8000)!=0);
+   if(key==16 || key==160 || key==161) g_shift_down=true;
+   if(key==17 || key==162 || key==163) g_ctrl_down=true;
    if(key==9)
      {
       PS_KeyboardFocusNext(g_shift_down);
@@ -1386,13 +1393,47 @@ void PS_HandleKeyDown(const int key)
    if(!g_editor.active) return;
    PS_UIGuardEnter(g_ui);
 
+   string before_text=g_editor.raw_text;
+   int before_cursor=g_editor.cursor;
+   int before_anchor=g_editor.anchor;
    PSEditKeyResult result=PS_EditorKey(g_editor,key,g_shift_down,g_ctrl_down);
-   if(result==PS_EDIT_KEY_CHANGED)
+   bool restoring_history=(result==PS_EDIT_KEY_UNDO || result==PS_EDIT_KEY_REDO);
+   if(restoring_history)
      {
+      int delta=(result==PS_EDIT_KEY_UNDO ? -1 : 1);
+      result=(PS_EditorRestoreHistory(g_editor,g_model,delta) ? PS_EDIT_KEY_CHANGED : PS_EDIT_KEY_NONE);
+     }
+   if(result==PS_EDIT_KEY_CUT && g_editor.has_selection)
+     {
+      int first=PS_EditorSelectionStart(g_editor);
+      int length=PS_EditorSelectionEnd(g_editor)-first;
+      if(length>0 && PS_CopyText(StringSubstr(g_editor.raw_text,first,length),"Selection"))
+        {
+         PS_EditorDeleteSelection(g_editor);
+         result=PS_EDIT_KEY_CHANGED;
+        }
+     }
+   if(result==PS_EDIT_KEY_PASTE)
+     {
+      string pasted="";
+      string error="";
+      if(PS_PlatformClipboardGet(pasted,error) && PS_EditorPaste(g_editor,pasted,error))
+         result=PS_EDIT_KEY_CHANGED;
+      else
+        {
+         PS_SetStatus(error,true);
+         PS_LogWarningRateLimited("clipboard.paste",error,5000);
+        }
+     }
+   if(result==PS_EDIT_KEY_CHANGED && g_editor.raw_text!=before_text)
+     {
+      PSModel before_model;
+      PS_CopyModel(before_model,g_model);
       string ignored="";
-      PS_EditorApplyRaw(g_editor,g_model,g_market,false,ignored);
+      if(!restoring_history) PS_EditorApplyRaw(g_editor,g_model,g_market,false,ignored);
       PS_ClearTransientStatus();
       PS_Recalculate(false);
+      if(!restoring_history) PS_EditorRecordChange(g_editor,before_text,before_cursor,before_anchor,before_model,g_model);
      }
    else if(result==PS_EDIT_KEY_COMMIT) PS_CommitEditor();
    else if(result==PS_EDIT_KEY_CANCEL) PS_CancelEditor();
@@ -1408,8 +1449,8 @@ void PS_HandleKeyDown(const int key)
 
 void PS_HandleKeyUp(const int key)
   {
-   if(key==16) g_shift_down=false;
-   if(key==17) g_ctrl_down=false;
+   if(key==16 || key==160 || key==161) g_shift_down=false;
+   if(key==17 || key==162 || key==163) g_ctrl_down=false;
   }
 
 int PS_StepperAccelerationStage(const ulong elapsed)
@@ -1456,7 +1497,7 @@ int OnInit()
   {
    if(!MQLInfoInteger(MQL_DLLS_ALLOWED))
      {
-      string message="LotCraft 1.2.2 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
+      string message="LotCraft 1.2.3 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
       PS_LogError(message);
       MessageBox(message,PS_PRODUCT_NAME+" initialization",MB_OK|MB_ICONERROR);
       return(INIT_FAILED);

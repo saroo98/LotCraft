@@ -108,6 +108,8 @@ const int PS_CTRL_NONE=-1,PS_CTRL_COUNT=40;
 bool g_initialized=true,g_symbol_transition_pending=true;
 bool g_ps_panel_render_ready=true;
 bool g_shift_down=false,g_ctrl_down=false,g_panel_dirty=false;
+const int TERMINAL_KEYSTATE_SHIFT=1,TERMINAL_KEYSTATE_CONTROL=2;
+int TerminalInfoInteger(int key){return key==TERMINAL_KEYSTATE_CONTROL?(g_ctrl_down?0x8000:0):(g_shift_down?0x8000:0);}
 bool g_exposure_details_dirty=false,g_exposure_labels_dirty=false;
 bool g_ps_control_visible[PS_CTRL_COUNT]={};
 int g_keyboard_focus=1,actions=0,tabs=0;
@@ -115,6 +117,8 @@ struct UI {bool dirty=false;} g_ui;
 struct PSEditorState {bool active=false,has_selection=false;string raw_text;int cursor=0,anchor=0;} g_editor;
 struct ExposureUI {bool details_open=false;} g_exposure_ui;
 int g_model=0,g_market=0;
+using PSModel=int;
+void PS_CopyModel(PSModel &to,const PSModel &from){to=from;}
 void PS_KeyboardFocusNext(bool) {++tabs;}
 void PS_CancelEditor() {}
 void PS_SaveState() {}
@@ -129,6 +133,13 @@ bool PS_CommitEditor() {return true;}
 int MathMin(int a,int b){return a<b?a:b;}int MathMax(int a,int b){return a>b?a:b;}
 string StringSubstr(const string &s,int p,int n){return s.substr(p,n);}
 int copies=0;bool PS_CopyText(const string&,const string&){++copies;return true;}
+bool PS_PlatformClipboardGet(string&,string&){return false;}
+bool PS_EditorPaste(PSEditorState&,const string&,string&){return false;}
+bool PS_EditorRestoreHistory(PSEditorState&,PSModel&,int){return false;}
+void PS_EditorRecordChange(PSEditorState&,const string&,int,int,const PSModel&,const PSModel&){}
+void PS_EditorDeleteSelection(PSEditorState&){}
+void PS_SetStatus(const string&,bool){}
+void PS_LogWarningRateLimited(const string&,const string&,int){}
 '''
     source += extract_functions(EDITOR, "PS_EditorSelectionStart", "PS_EditorSelectionEnd")
     source += extract_functions(EA, "PS_HandleKeyDown")

@@ -2,13 +2,13 @@
 #define __LOTCRAFT_PS_TYPES_MQH__
 
 #define PS_PRODUCT_NAME              "LotCraft"
-#define PS_VERSION_TEXT              "1.2.2"
+#define PS_VERSION_TEXT              "1.2.3"
 #define PS_SOURCE_NAME               "LotCraft.mq5"
 #define PS_BINARY_NAME               "LotCraft.ex5"
 #define PS_LOG_PREFIX                "LotCraft"
 #define PS_OBJECT_NAMESPACE          "LotCraft.v100"
 #define PS_STATE_NAMESPACE           "LotCraft.100"
-#define PS_REQUEST_COMMENT           "LotCraft 1.2.2"
+#define PS_REQUEST_COMMENT           "LotCraft 1.2.3"
 
 #define PS_DIAGNOSTICS               0
 #define PS_POINTER_BUDGET_US         2000
@@ -353,6 +353,14 @@ struct PSEditorState
    int anchor;
    bool has_selection;
    PSModel before;
+   // Per-field session only. Fixed capacity bounds undo memory and drops redo
+   // when a new edit follows an undo. Nothing is persisted or logged.
+   string history_text[32];
+   int history_cursor[32];
+   int history_anchor[32];
+   PSModel history_model[32];
+   int history_count;
+   int history_index;
   };
 
 struct PSPointerState

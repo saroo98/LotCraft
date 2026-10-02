@@ -9,7 +9,11 @@ enum PSEditKeyResult
    PS_EDIT_KEY_CHANGED=1,
    PS_EDIT_KEY_COMMIT=2,
    PS_EDIT_KEY_CANCEL=3,
-   PS_EDIT_KEY_COPY=4
+   PS_EDIT_KEY_COPY=4,
+   PS_EDIT_KEY_PASTE=5,
+   PS_EDIT_KEY_CUT=6,
+   PS_EDIT_KEY_UNDO=7,
+   PS_EDIT_KEY_REDO=8
   };
 
 void PS_EditorReset(PSEditorState &editor)
@@ -21,6 +25,8 @@ void PS_EditorReset(PSEditorState &editor)
    editor.cursor=0;
    editor.anchor=0;
    editor.has_selection=false;
+   editor.history_count=0;
+   editor.history_index=0;
   }
 
 string PS_EditorModelText(const PSFieldId field,const PSModel &model,const PSMarketSnapshot &market)
@@ -44,6 +50,8 @@ void PS_EditorBegin(PSEditorState &editor,const PSFieldId field,const PSModel &m
    editor.field=field;
    editor.raw_text=PS_EditorModelText(field,model,market);
    editor.original_text=editor.raw_text;
+   editor.history_count=0;
+   editor.history_index=0;
    editor.cursor=StringLen(editor.raw_text);
    editor.anchor=editor.cursor;
    editor.has_selection=false;
@@ -70,6 +78,75 @@ int PS_EditorSelectionEnd(const PSEditorState &editor)
 void PS_EditorRefreshSelection(PSEditorState &editor)
   {
    editor.has_selection=(editor.cursor!=editor.anchor);
+  }
+
+void PS_EditorRecordChange(PSEditorState &editor,const string before,const int cursor,const int anchor,
+                          const PSModel &before_model,const PSModel &model)
+  {
+   if(editor.raw_text==before) return;
+   if(editor.history_count==0)
+     {
+      editor.history_count=1;
+      editor.history_index=0;
+     }
+   int index=editor.history_index;
+   editor.history_text[index]=before;
+   editor.history_cursor[index]=cursor;
+   editor.history_anchor[index]=anchor;
+   PS_CopyModel(editor.history_model[index],before_model);
+   editor.history_count=index+1;
+   if(editor.history_count==32)
+     {
+      for(int i=1;i<32;i++)
+        {
+         editor.history_text[i-1]=editor.history_text[i];
+         editor.history_cursor[i-1]=editor.history_cursor[i];
+         editor.history_anchor[i-1]=editor.history_anchor[i];
+         PS_CopyModel(editor.history_model[i-1],editor.history_model[i]);
+        }
+      editor.history_count=31;
+     }
+   index=editor.history_count;
+   editor.history_text[index]=editor.raw_text;
+   editor.history_cursor[index]=editor.cursor;
+   editor.history_anchor[index]=editor.anchor;
+   PS_CopyModel(editor.history_model[index],model);
+   editor.history_index=index;
+   editor.history_count++;
+  }
+
+bool PS_EditorRestoreHistory(PSEditorState &editor,PSModel &model,const int delta)
+  {
+   int index=editor.history_index+delta;
+   if(editor.history_count==0 || index<0 || index>=editor.history_count) return(false);
+   editor.history_cursor[editor.history_index]=editor.cursor;
+   editor.history_anchor[editor.history_index]=editor.anchor;
+   editor.history_index=index;
+   editor.raw_text=editor.history_text[index];
+   editor.cursor=editor.history_cursor[index];
+   editor.anchor=editor.history_anchor[index];
+   PS_EditorRefreshSelection(editor);
+   // Incomplete/invalid text retains its last valid preview. Restore that
+   // preview too, without rewinding live quotes or unrelated model settings.
+   PSModel preview;
+   PS_CopyModel(preview,editor.history_model[index]);
+   switch(editor.field)
+     {
+      case PS_FIELD_ENTRY:      model.entry=preview.entry; break;
+      case PS_FIELD_STOP:       model.stop_loss=preview.stop_loss; break;
+      case PS_FIELD_TAKE:       model.take_profit=preview.take_profit; break;
+      case PS_FIELD_COMMISSION: model.commission_per_lot=preview.commission_per_lot; break;
+      case PS_FIELD_ACCOUNT:    model.manual_account_money=preview.manual_account_money; break;
+      case PS_FIELD_RISK_PERCENT:
+      case PS_FIELD_RISK_MONEY:
+         model.risk_authority=preview.risk_authority;
+         model.requested_risk_percent=preview.requested_risk_percent;
+         model.requested_risk_money=preview.requested_risk_money;
+         break;
+      default: break;
+     }
+   model.revision++;
+   return(true);
   }
 
 void PS_EditorDeleteSelection(PSEditorState &editor)
@@ -190,6 +267,32 @@ bool PS_EditorParseNumber(const string raw,double &value,bool &incomplete)
    StringReplace(canonical,",",".");
    value=StringToDouble(canonical);
    if(!PS_IsFinite(value)) return(false);
+   return(true);
+  }
+
+bool PS_EditorPaste(PSEditorState &editor,const string text,string &error)
+  {
+   error="";
+   if(!editor.active) return(false);
+   string inserted=text;
+   StringTrimLeft(inserted);
+   StringTrimRight(inserted);
+   int first=(editor.has_selection ? PS_EditorSelectionStart(editor) : editor.cursor);
+   int finish=(editor.has_selection ? PS_EditorSelectionEnd(editor) : editor.cursor);
+   if(inserted=="" || StringLen(editor.raw_text)-(finish-first)+StringLen(inserted)>32)
+     {
+      error="Paste a number of at most 32 characters.";
+      return(false);
+     }
+   string candidate=StringSubstr(editor.raw_text,0,first)+inserted+StringSubstr(editor.raw_text,finish);
+   double value=0.0;
+   bool incomplete=false;
+   if(!PS_EditorParseNumber(candidate,value,incomplete) && !incomplete)
+     {
+      error="Paste an unformatted number with one decimal point or comma.";
+      return(false);
+     }
+   PS_EditorInsert(editor,inserted);
    return(true);
   }
 
@@ -325,11 +428,17 @@ PSEditKeyResult PS_EditorKey(PSEditorState &editor,const int key,const bool shif
       PS_EditorSelectAll(editor);
       return(PS_EDIT_KEY_NONE);
      }
-   if(ctrl_down && key==67) return(PS_EDIT_KEY_COPY);
+   if(ctrl_down && (key==67 || key==45)) return(PS_EDIT_KEY_COPY);
+   if((ctrl_down && key==86) || (shift_down && key==45)) return(PS_EDIT_KEY_PASTE);
+   if((ctrl_down && key==88) || (shift_down && key==46)) return(PS_EDIT_KEY_CUT);
+   if(ctrl_down && key==90) return(shift_down ? PS_EDIT_KEY_REDO : PS_EDIT_KEY_UNDO);
+   if(ctrl_down && key==89) return(PS_EDIT_KEY_REDO);
 
    if(key==37)
      {
-      if(editor.has_selection && !shift_down)
+      if(ctrl_down)
+         PS_EditorMoveCursor(editor,0,shift_down);
+      else if(editor.has_selection && !shift_down)
          PS_EditorMoveCursor(editor,PS_EditorSelectionStart(editor),false);
       else
          PS_EditorMoveCursor(editor,editor.cursor-1,shift_down);
@@ -337,33 +446,39 @@ PSEditKeyResult PS_EditorKey(PSEditorState &editor,const int key,const bool shif
      }
    if(key==39)
      {
-      if(editor.has_selection && !shift_down)
+      if(ctrl_down)
+         PS_EditorMoveCursor(editor,StringLen(editor.raw_text),shift_down);
+      else if(editor.has_selection && !shift_down)
          PS_EditorMoveCursor(editor,PS_EditorSelectionEnd(editor),false);
       else
          PS_EditorMoveCursor(editor,editor.cursor+1,shift_down);
       return(PS_EDIT_KEY_NONE);
      }
-   if(key==36)
+   if(key==36 || key==38)
      {
       PS_EditorMoveCursor(editor,0,shift_down);
       return(PS_EDIT_KEY_NONE);
      }
-   if(key==35)
+   if(key==35 || key==40)
      {
       PS_EditorMoveCursor(editor,StringLen(editor.raw_text),shift_down);
       return(PS_EDIT_KEY_NONE);
      }
    if(key==8)
      {
+      if(ctrl_down && !editor.has_selection) PS_EditorMoveCursor(editor,0,true);
       PS_EditorBackspace(editor);
       return(PS_EDIT_KEY_CHANGED);
      }
    if(key==46)
      {
+      if(ctrl_down && !editor.has_selection) PS_EditorMoveCursor(editor,StringLen(editor.raw_text),true);
       PS_EditorDelete(editor);
       return(PS_EDIT_KEY_CHANGED);
      }
 
+   // Unknown Ctrl combinations must not become numeric input.
+   if(ctrl_down) return(PS_EDIT_KEY_NONE);
    short translated=TranslateKey(key);
    if(translated<=0) return(PS_EDIT_KEY_NONE);
    string character=ShortToString(translated);

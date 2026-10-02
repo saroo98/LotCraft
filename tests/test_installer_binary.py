@@ -39,7 +39,7 @@ def test_installer_has_valid_resource_directory_and_version_strings(synthetic_in
     assert resource_rva == resource["virtual_address"]
     assert resource_size > 0
     payload = bytes(raw[int(resource["raw_pointer"]) : int(resource["raw_pointer"]) + int(resource["raw_size"])])
-    for text in ["LotCraft", "LotCraft 1.2.2 Installer", "1.2.2.0"]:
+    for text in ["LotCraft", "LotCraft 1.2.3 Installer", "1.2.3.0"]:
         assert stamp_pe_version.utf16z(text) in payload
 
 

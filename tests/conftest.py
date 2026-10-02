@@ -49,6 +49,6 @@ def synthetic_installer(tmp_path_factory) -> Path:
         env=env, capture_output=True, text=True, timeout=120, check=False, **options,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    output = workspace / "build" / "LotCraft-1.2.2-Setup.exe"
+    output = workspace / "build" / "LotCraft-1.2.3-Setup.exe"
     assert output.is_file()
     return output

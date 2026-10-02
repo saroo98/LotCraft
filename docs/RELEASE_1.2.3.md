@@ -37,7 +37,15 @@ Local private evidence is under ignored `build/release-audit-20261003`. No raw l
 | `RELEASE-VERIFICATION.json` | 2,116 | `029941d575462028cbb910740820c2ffde89fa6b049bcdbf880cd4cd183bb01e` |
 | `LotCraft.ex5` (embedded, not uploaded separately) | 281,064 | `9ffc6ef1c77bfe049e7b4b24c5d072d309c65568873bf857cd852dc31b39639a` |
 
-The public release contains only the first five assets. Publication and fresh public download/update detection checks are next; no remote result is claimed yet.
+The public release contains only the first five assets. All uploaded digests and sizes matched local bytes before the draft was published. All five fresh public downloads also match local sizes and hashes. Their signed metadata verifies against the unchanged pinned key.
+
+## Publication and updater verification
+
+[LotCraft 1.2.3](https://github.com/saroo98/LotCraft/releases/tag/v1.2.3) is latest stable, published at 2026-10-02T23:15:51Z (October 3 in the owner's local timezone). Three meaningful commits separate bounded clipboard reads/isolation, editor fixes/release identity, and audit/installation documentation. The atomic normal push updated main and the feature branch to `6afc5c6190e630ebc6d3d70684d4cb88bb16cbcc`; the annotated v1.2.3 tag peels to that verified source commit. A final documentation-only commit records publication evidence without moving the tag.
+
+The production `Checker` runs anonymously against the public latest endpoint with the pinned public key, normal allowed hosts and redirect/download rules. It sees 1.2.3 for installed version 1.2.2, verifies the installer download's signed size/hash, and returns no newer candidate for installed version 1.2.3. The temporary release smoke test passes in 1.78s and is removed afterward. This is a real network/signature/download check, not an installed-updater popup, scheduler or activation test. No updater state, account data, user clipboard or terminal input is accessed by that smoke test.
+
+No publication blocker remains in the checks performed. Native shortcut delivery, Unicode clipboard marshalling and actual user activation remain unverified, not relabeled as passed. The independent review's smaller domain-invalid/rolling-history/live-recalculation test gap is also explicit; source inspection is not native execution proof.
 
 ## Native and activation limits
 

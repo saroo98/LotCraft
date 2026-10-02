@@ -17,6 +17,9 @@ def test_production_platform_body_on_private_windows_clipboard(tmp_path, zero_ow
     source = source.replace("// INSERT_PRODUCTION_COPY_FUNCTION", extract_function(
         "MQL5/Experts/LotCraft/PS_Platform.mqh", "PS_PlatformClipboardSet",
     ))
+    source = source.replace("// INSERT_PRODUCTION_PASTE_FUNCTION", extract_function(
+        "MQL5/Experts/LotCraft/PS_Platform.mqh", "PS_PlatformClipboardGet",
+    ).replace("ushort units[];", "std::vector<ushort> units;"))
     if zero_owner:
         # Select an existing fixture branch without passing arguments through
         # the shared runner. The production function is not rewritten.
@@ -25,3 +28,21 @@ def test_production_platform_body_on_private_windows_clipboard(tmp_path, zero_ow
     if "ISOLATION_UNAVAILABLE:" in output:
         pytest.skip(output.strip())
     assert "PRIVATE_STATION_VERIFIED:" in output
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="System DLL exports require Windows")
+def test_imported_clipboard_read_functions_exist_in_system_dlls(tmp_path):
+    compile_and_run(tmp_path, r'''
+#include <windows.h>
+#include <cassert>
+int main(){
+  auto user=GetModuleHandleW(L"user32.dll");
+  if(!user)user=LoadLibraryW(L"user32.dll");
+  auto kernel=GetModuleHandleW(L"kernel32.dll");
+  assert(user && kernel);
+  assert(GetProcAddress(user,"IsClipboardFormatAvailable"));
+  assert(GetProcAddress(user,"GetClipboardData"));
+  assert(GetProcAddress(kernel,"GlobalSize"));
+  assert(GetProcAddress(kernel,"RtlMoveMemory"));
+}
+''', link_args=("-luser32",))

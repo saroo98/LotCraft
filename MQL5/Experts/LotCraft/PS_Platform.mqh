@@ -14,6 +14,9 @@ int   GetCursorPos(int &point[]);
 int   ScreenToClient(uint hWnd,int &point[]);
 int   ScreenToClient(ulong hWnd,int &point[]);
 int   EmptyClipboard();
+int   IsClipboardFormatAvailable(uint uFormat);
+long  GetClipboardData(int uFormat);
+uint  GetClipboardData(uint uFormat);
 uint  SetClipboardData(uint uFormat,uint hMem);
 ulong SetClipboardData(uint uFormat,ulong hMem);
 int   CloseClipboard();
@@ -31,6 +34,10 @@ int   GlobalUnlock(uint hMem);
 int   GlobalUnlock(ulong hMem);
 uint  GlobalFree(uint hMem);
 ulong GlobalFree(ulong hMem);
+uint  GlobalSize(uint hMem);
+ulong GlobalSize(ulong hMem);
+void  RtlMoveMemory(ushort &destination[],uint source,uint bytes);
+void  RtlMoveMemory(ushort &destination[],ulong source,ulong bytes);
 uint  lstrcpyW(uint destination,string source);
 ulong lstrcpyW(ulong destination,string source);
 #import
@@ -184,6 +191,79 @@ bool PS_PlatformClipboardSet(const string text,string &error)
       error="Windows rejected the clipboard data.";
       return(false);
      }
+   return(true);
+  }
+
+bool PS_PlatformClipboardGet(string &text,string &error)
+  {
+   text="";
+   error="";
+   if(!MQLInfoInteger(MQL_DLLS_ALLOWED))
+     {
+      error="Clipboard requires MT5 'Allow DLL imports' for this EA.";
+      return(false);
+     }
+   long owner=0;
+   if(!ChartGetInteger(ChartID(),CHART_WINDOW_HANDLE,0,owner) || owner==0)
+     {
+      error="Cannot obtain a valid chart window handle.";
+      return(false);
+     }
+   if(IsClipboardFormatAvailable(PS_CF_UNICODETEXT)==0)
+     {
+      error="The clipboard has no Unicode text to paste.";
+      return(false);
+     }
+   int opened=(_IsX64 ? OpenClipboard((ulong)owner) : OpenClipboard((uint)owner));
+   if(opened==0)
+     {
+      error="Windows clipboard is currently unavailable.";
+      return(false);
+     }
+   ulong memory=(_IsX64 ? (ulong)GetClipboardData((int)PS_CF_UNICODETEXT)
+                       : (ulong)GetClipboardData((uint)PS_CF_UNICODETEXT));
+   ulong bytes=(memory==0 ? 0 : (_IsX64 ? GlobalSize(memory) : (ulong)GlobalSize((uint)memory)));
+   // Clipboard data is untrusted. Bound the UTF-16 read and require a terminator.
+   if(bytes<2 || bytes>65536 || bytes%2!=0)
+     {
+      CloseClipboard();
+      error="The clipboard text is unavailable or too large.";
+      return(false);
+     }
+   ushort units[];
+   int count=(int)(bytes/2);
+   if(ArrayResize(units,count)!=count)
+     {
+      CloseClipboard();
+      error="Cannot allocate memory for clipboard text.";
+      return(false);
+     }
+   ulong pointer=(_IsX64 ? GlobalLock(memory) : (ulong)GlobalLock((uint)memory));
+   if(pointer==0)
+     {
+      CloseClipboard();
+      error="Windows could not lock clipboard text.";
+      return(false);
+     }
+   if(_IsX64)
+     {
+      RtlMoveMemory(units,pointer,bytes);
+      GlobalUnlock(memory);
+     }
+   else
+     {
+      RtlMoveMemory(units,(uint)pointer,(uint)bytes);
+      GlobalUnlock((uint)memory);
+     }
+   CloseClipboard();
+   int length=0;
+   while(length<count && units[length]!=0) length++;
+   if(length==count)
+     {
+      error="The clipboard text has no valid terminator.";
+      return(false);
+     }
+   text=ShortArrayToString(units,0,length);
    return(true);
   }
 

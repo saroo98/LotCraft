@@ -1,4 +1,4 @@
-# LotCraft 1.2.1 Test Plan
+# LotCraft 1.2.4 Test Plan
 
 ## 1. Test policy
 
@@ -25,6 +25,7 @@
 | Production-function UI | `tests/test_native_ui.py` | Measured field/selection/caret bounds, pagination, missing-data states, DPI resources, contrast and canvas-allocation failure |
 | Production-function plan/marker regression | `tests/test_native_plan_preservation.py`, `tests/test_native_exposure_review.py` | Per-symbol and legacy round trips, actual controller transitions, fixed protective prices across mode cycles, invalid saved plans, unsupported Pending recovery, separated handles and label lanes at supported scales |
 | Current-source installer | `tests/conftest.py`, `installer/cmd/setup/audit_regression_windows_test.go` | Synthetic nontrading payload, no historical build dependency, migration collision, rollback restoration failure, worker cleanup and path linkage |
+| Event-time keyboard regression | `tests/test_native_clipboard.py`, `tests/test_native_shortcut_release.py`, `tests/test_native_shortcut_layout.py` | Independent physical observations; delayed events; left/right overlap; release-only shortcuts; modifier release order; command deduplication; layout preservation and true-context invalidation |
 
 Native function fixtures compile extracted MQL bodies as C++17 with deterministic platform stubs. MQL array signatures/declarations receive documented syntax-only adapters where needed. They are stronger than duplicated reference models but do not emulate UTF-16, MT5's event queue, native canvas rasterization or broker behavior. Require g++ and inspect skipped tests explicitly. Fresh installer PE tests require Go, Git Bash and pytest; they do not require a private signing key.
 
@@ -85,7 +86,9 @@ For the 1.2.3 keyboard fixes described in [the 2026-10-02 audit](KEYBOARD_AUDIT_
     Also clear SL, paste another value, then undo to the empty field. Its calculated preview must restore the prior value. Repeat in Manual account and both risk fields, including a change of risk authority; undo must not retain the later value or alter unrelated settings.
 14. Tab/Shift+Tab include editable Manual account money and skip its read-only Balance/Equity value. Shift+Tab from no focus begins at the last visible control. Enter commits and Escape restores the original model without placing a trade while editing.
 
-These additions are local source behavior until separately packaged and deployed; they do not retroactively change the published 1.2.2 binary.
+15. For the 1.2.4 event-delivery correction, exercise Ctrl+A/C/V/X/Z with brief presses in each terminal. Ctrl+A must survive a chart-layout event without a field change. Copy, paste, cut and undo must execute only once when both press and release arrive. Changing the symbol, field or explicit pointer focus must not apply an old command to the new field.
+
+These tests do not retroactively change older published binaries. Native acceptance must use the newly activated build, not only the version written on disk.
 
 ## 6. Manual chart interaction matrix
 

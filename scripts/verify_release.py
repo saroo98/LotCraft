@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 PRODUCT = "LotCraft"
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 SUMMARY_RE = re.compile(r"(?i)(\d+)\s+errors?\s*,\s*(\d+)\s+warnings?")
 
 

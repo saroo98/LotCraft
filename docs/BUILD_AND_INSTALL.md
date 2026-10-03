@@ -1,11 +1,11 @@
-# LotCraft 1.2.3 Build and Installation
+# LotCraft 1.2.4 Build and Installation
 
 ## End-user installation
 
 The release contains one self-contained Windows x64 installer:
 
 ```text
-LotCraft-1.2.3-Setup.exe
+LotCraft-1.2.4-Setup.exe
 ```
 
 1. Download the installer from the latest GitHub Release.
@@ -81,7 +81,7 @@ The release script:
 5. Restores the exact prebuild embedded payload source bytes.
 6. Stamps and verifies Windows version metadata.
 7. Embeds the pinned Ed25519 public key in the installer/updater.
-8. Stages the installer and EX5 under `release\LotCraft-1.2.3`.
+8. Stages the installer and EX5 under `release\LotCraft-1.2.4`.
 9. Signs the exact final installer metadata as `LotCraft-update.json` and `LotCraft-update.sig`.
 10. Verifies the signature and installer descriptor.
 11. Writes release verification evidence. Public output must contain artifact roles, names and hashes, not absolute workspace or terminal paths.
@@ -124,7 +124,7 @@ The signed JSON records the schema, product, stable semantic version, tag, insta
 The self-contained installer is the normal end-user path. For release engineering only, an explicit canonical payload can override the embedded payload:
 
 ```powershell
-.\LotCraft-1.2.3-Setup.exe `
+.\LotCraft-1.2.4-Setup.exe `
   -terminal-data-dir "C:\path\to\terminal\data" `
   -payload "C:\path\to\LotCraft.ex5" `
   -quiet

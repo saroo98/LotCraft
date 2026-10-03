@@ -20,7 +20,7 @@ def render_capture_rows(tmp_path_factory):
 #include <cmath>
 #include <iostream>
 #include <string>
-using string=std::string;using ulong=unsigned long long;using datetime=long long;
+using string=std::string;using ulong=unsigned long long;using uint=unsigned int;using datetime=long long;
 enum PSControlId {PS_CTRL_NONE=-1,PS_CTRL_TEST,PS_CTRL_COUNT};
 enum PSCaptureMode {PS_CAPTURE_NONE,PS_CAPTURE_PANEL,PS_CAPTURE_HANDLE_ENTRY,
  PS_CAPTURE_HANDLE_STOP,PS_CAPTURE_HANDLE_TAKE,PS_CAPTURE_STEPPER,PS_CAPTURE_CONTROL};
@@ -47,6 +47,11 @@ int g_calc=0,g_exposure=0,g_copy_feedback_control=0;
 bool g_initialized=true,g_symbol_transition_pending=false,g_ps_panel_render_ready=true,
  g_pointer_motion_pending=true,g_panel_dirty=false,g_exposure_details_dirty=true,
  g_exposure_labels_dirty=true,g_ps_exposure_labels_layout_dirty=false,g_shift_down=true,g_ctrl_down=true;
+bool g_shift_state_known=true,g_ctrl_state_known=true;
+uint g_shift_pressed_keys=1,g_ctrl_pressed_keys=1;
+uint g_shortcut_keydowns=3;
+bool g_shortcut_ctrl_context=true,g_shortcut_shift_context=true;
+using PSFieldId=int;PSFieldId g_shortcut_field=1;
 int g_pointer_motion_x=0,g_pointer_motion_y=0;
 PSControlId g_keyboard_focus=PS_CTRL_TEST,g_pressed_control=PS_CTRL_TEST,g_hovered_control=PS_CTRL_TEST;
 PSExposureHit g_exposure_pressed_hit=PS_EXPOSURE_HIT_ROW;
@@ -111,6 +116,8 @@ void PS_UpdateInteractionGuard(int,int);
 void PS_RenderIfDirty();
 '''
     source += extract_function(UI, "PS_UIGuardExit").replace("PSUIState", "UIState")
+    source += extract_function(EA, "PS_ResetShortcutContext")
+    source += extract_function(EA, "PS_ResetKeyboardModifiers")
     source += extract_function(EA, "PS_AbortInteractionForContextChange")
     try:
         source += extract_function(EA, "PS_AbortInteractionForRenderFailure")
@@ -141,6 +148,7 @@ int main(){
  // must not change or save the unseen plan. Chart flags must be restored.
  reset(PS_CAPTURE_STEPPER);PS_RenderIfDirty();
  PS_TimerStepper();PS_MouseRelease(20,200);PS_UpdateInteractionGuard(20,200);report();
+ if(g_shortcut_keydowns || g_shortcut_ctrl_context || g_shortcut_shift_context || g_shortcut_field!=PS_FIELD_NONE) return 1;
  // A stop crossing Entry invokes the direct render path while dragging.
  reset(PS_CAPTURE_HANDLE_STOP);flip_direction=true;
  PS_MouseMoveCaptured(20,110);double failed_at=g_model.stop_loss;

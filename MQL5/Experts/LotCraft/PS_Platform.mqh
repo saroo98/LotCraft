@@ -21,6 +21,7 @@ uint  SetClipboardData(uint uFormat,uint hMem);
 ulong SetClipboardData(uint uFormat,ulong hMem);
 int   CloseClipboard();
 short GetAsyncKeyState(int vKey);
+uint  MapVirtualKeyW(uint uCode,uint uMapType);
 uint  GetDoubleClickTime();
 int   GetSystemMetrics(int nIndex);
 #import
@@ -338,6 +339,42 @@ bool PS_PlatformLeftButtonDown()
    if(!MQLInfoInteger(MQL_DLLS_ALLOWED)) return(true);
    short state=GetAsyncKeyState(PS_VK_LBUTTON);
    return((state & 0x8000)!=0);
+  }
+
+void PS_PlatformKeyboardModifiers(bool &shift_down,bool &ctrl_down)
+  {
+   // Seed only unknown modifier state. Delivered chart events own known state.
+   // The EA runs outside the chart's Windows message thread, so prefer Windows
+   // physical state over a terminal observation at that initial boundary.
+   // Only the high bit means held; the low "pressed since last call" bit does not.
+   if(MQLInfoInteger(MQL_DLLS_ALLOWED))
+     {
+      shift_down=((GetAsyncKeyState(16) & 0x8000)!=0);
+      ctrl_down=((GetAsyncKeyState(17) & 0x8000)!=0);
+      return;
+     }
+   shift_down=((TerminalInfoInteger(TERMINAL_KEYSTATE_SHIFT) & 0x8000)!=0);
+   ctrl_down=((TerminalInfoInteger(TERMINAL_KEYSTATE_CONTROL) & 0x8000)!=0);
+  }
+
+uint PS_PlatformModifierSide(const int key,const uint flags)
+  {
+   if(key==160 || key==162) return(1);
+   if(key==161 || key==163) return(2);
+   // MQL keyboard sparam contains the high WORD of Windows' key lParam:
+   // scan code in bits 0..7, extended-key attribute in bit 8.
+   if(key==17) return((flags & 0x100)!=0 ? 2 : 1);
+   if(key==16)
+     {
+      uint scan=flags & 0xFF;
+      if(scan!=0 && MQLInfoInteger(MQL_DLLS_ALLOWED))
+        {
+         uint right_scan=MapVirtualKeyW(161,0) & 0xFF;
+         if(right_scan!=0 && scan==right_scan) return(2);
+        }
+      return(1);
+     }
+   return(0);
   }
 
 bool PS_PlatformLaunchUpdater(string &error)

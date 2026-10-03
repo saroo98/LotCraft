@@ -104,17 +104,28 @@ def test_waiting_panel_cannot_activate_stale_keyboard_focus(tmp_path):
 #include <cassert>
 using string=std::string;
 ''' + declaration(EDITOR, "PSEditKeyResult") + r'''
+using uint=unsigned int;
 const int PS_CTRL_NONE=-1,PS_CTRL_COUNT=40;
 bool g_initialized=true,g_symbol_transition_pending=true;
 bool g_ps_panel_render_ready=true;
 bool g_shift_down=false,g_ctrl_down=false,g_panel_dirty=false;
+bool g_shift_state_known=false,g_ctrl_state_known=false;
+uint g_shift_pressed_keys=0,g_ctrl_pressed_keys=0;
+uint g_shortcut_keydowns=0;
+bool g_shortcut_ctrl_context=false,g_shortcut_shift_context=false;
+using PSFieldId=int;const int PS_FIELD_NONE=-1;
+PSFieldId g_shortcut_field=PS_FIELD_NONE;
 const int TERMINAL_KEYSTATE_SHIFT=1,TERMINAL_KEYSTATE_CONTROL=2;
-int TerminalInfoInteger(int key){return key==TERMINAL_KEYSTATE_CONTROL?(g_ctrl_down?0x8000:0):(g_shift_down?0x8000:0);}
+int TerminalInfoInteger(int){return 0;}
+const int MQL_DLLS_ALLOWED=1;
+bool MQLInfoInteger(int){return false;}
+short GetAsyncKeyState(int){assert(false);return 0;}
+uint MapVirtualKeyW(uint,uint){assert(false);return 0;}
 bool g_exposure_details_dirty=false,g_exposure_labels_dirty=false;
 bool g_ps_control_visible[PS_CTRL_COUNT]={};
 int g_keyboard_focus=1,actions=0,tabs=0;
 struct UI {bool dirty=false;} g_ui;
-struct PSEditorState {bool active=false,has_selection=false;string raw_text;int cursor=0,anchor=0;} g_editor;
+struct PSEditorState {bool active=false,has_selection=false;string raw_text;int cursor=0,anchor=0;PSFieldId field=PS_FIELD_NONE;} g_editor;
 struct ExposureUI {bool details_open=false;} g_exposure_ui;
 int g_model=0,g_market=0;
 using PSModel=int;
@@ -142,7 +153,9 @@ void PS_SetStatus(const string&,bool){}
 void PS_LogWarningRateLimited(const string&,const string&,int){}
 '''
     source += extract_functions(EDITOR, "PS_EditorSelectionStart", "PS_EditorSelectionEnd")
-    source += extract_functions(EA, "PS_HandleKeyDown")
+    source += extract_functions("MQL5/Experts/LotCraft/PS_Platform.mqh", "PS_PlatformKeyboardModifiers", "PS_PlatformModifierSide")
+    source += extract_functions(EA, "PS_ObserveKeyboardModifier")
+    source += extract_functions(EA, "PS_ResetShortcutContext", "PS_RecordShortcutContext", "PS_KeyboardShortcutBit", "PS_ExecuteEditorKey", "PS_HandleKeyDown")
     source += r'''
 int main() {
   g_ps_control_visible[1]=true;

@@ -153,6 +153,7 @@ int main(){
 def keyboard_source() -> str:
     return copy_source() + "\n" + declaration(EDITOR, "PSEditKeyResult") + r'''
 using ushort=unsigned short;
+using uint=unsigned int;
 struct PSEditorState {
   bool active=true,has_selection=true;PSFieldId field=PS_FIELD_STOP;
   string raw_text="1.12345",original_text="1.12345";int cursor=7,anchor=0;
@@ -162,12 +163,26 @@ struct PSEditorState {
 } g_editor;
 bool g_initialized=true,g_symbol_transition_pending=false,g_ps_panel_render_ready=true;
 bool g_shift_down=false,g_ctrl_down=false,g_panel_dirty=false;
+bool g_shift_state_known=false,g_ctrl_state_known=false;
+uint g_shift_pressed_keys=0,g_ctrl_pressed_keys=0;
+uint g_shortcut_keydowns=0;
+bool g_shortcut_ctrl_context=false,g_shortcut_shift_context=false;
+PSFieldId g_shortcut_field=PS_FIELD_NONE;
+uint physical_ctrl_keys=0,physical_shift_keys=0;
 const int TERMINAL_KEYSTATE_SHIFT=1,TERMINAL_KEYSTATE_CONTROL=2;
-bool native_key_states=false;int native_ctrl=0,native_shift=0;
-int TerminalInfoInteger(int key){
-  return key==TERMINAL_KEYSTATE_CONTROL?(native_key_states?native_ctrl:(g_ctrl_down?0x8000:0)):
-    (native_key_states?native_shift:(g_shift_down?0x8000:0));
+int native_ctrl=0,native_shift=0;
+const int MQL_DLLS_ALLOWED=1;
+bool dll_allowed=true;short windows_ctrl=0,windows_shift=0;
+int windows_key_reads=0;
+bool MQLInfoInteger(int){return dll_allowed;}
+short GetAsyncKeyState(int key){
+  ++windows_key_reads;assert(key==16 || key==17);
+  return key==17?windows_ctrl:windows_shift;
 }
+int TerminalInfoInteger(int key){
+  return key==TERMINAL_KEYSTATE_CONTROL?native_ctrl:native_shift;
+}
+uint MapVirtualKeyW(uint key,uint mode){assert(key==161 && mode==0);return 0x36;}
 bool clipboard_read_ok=true;int clipboard_reads=0;
 bool PS_PlatformClipboardGet(string &text,string &error){
   ++clipboard_reads;if(!clipboard_read_ok){error="Windows clipboard is currently unavailable.";return false;}
@@ -177,6 +192,7 @@ bool g_exposure_details_dirty=false,g_exposure_labels_dirty=false;
 bool g_ps_control_visible[PS_CTRL_COUNT]={};PSControlId g_keyboard_focus=PS_CTRL_STOP_FIELD;
 struct {bool details_open=false;} g_exposure_ui;
 int recalculations=0;
+int keyboard_renders=0;
 int StringLen(const string &s){return int(s.size());}
 string StringSubstr(const string &s,int begin,int length=-1){return s.substr(begin,length<0?string::npos:size_t(length));}
 int MathMin(int a,int b){return std::min(a,b);}int MathMax(int a,int b){return std::max(a,b);}
@@ -189,7 +205,7 @@ void StringTrimRight(string &s){auto i=s.find_last_not_of(" \t\r\n");s.erase(i==
 void StringReplace(string &s,const string &a,const string &b){for(size_t i=0;(i=s.find(a,i))!=string::npos;i+=b.size())s.replace(i,a.size(),b);}
 double StringToDouble(const string &s){return std::stod(s);}
 void PS_KeyboardFocusNext(bool){}void PS_CancelEditor(){}void PS_SaveState(){}
-void PS_RenderIfDirty(){}void PS_Action(PSControlId){}void PS_UIGuardEnter(decltype(g_ui)&){}
+void PS_RenderIfDirty(){++keyboard_renders;}void PS_Action(PSControlId){}void PS_UIGuardEnter(decltype(g_ui)&){}
 bool PS_EditorApplyRaw(PSEditorState&,PSModel&,PSMarketSnapshot&,bool,string&){return true;}
 void PS_ClearTransientStatus(){}void PS_Recalculate(bool){++recalculations;}
 bool PS_CommitEditor(){return true;}
@@ -197,7 +213,35 @@ bool PS_CommitEditor(){return true;}
         "PS_EditorSelectAll", "PS_EditorSelectionStart", "PS_EditorSelectionEnd",
         "PS_EditorRefreshSelection", "PS_EditorRecordChange", "PS_EditorRestoreHistory", "PS_EditorDeleteSelection", "PS_EditorInsert",
         "PS_EditorMoveCursor", "PS_EditorBackspace", "PS_EditorDelete", "PS_EditorParseNumber", "PS_EditorPaste", "PS_EditorKey",
-    ) + "\n" + extract_function(EA, "PS_HandleKeyDown")
+    ) + "\n" + extract_functions(PLATFORM, "PS_PlatformKeyboardModifiers", "PS_PlatformModifierSide") + "\n" + extract_functions(
+        EA, "PS_ResetShortcutContext", "PS_RecordShortcutContext", "PS_KeyboardShortcutBit",
+        "PS_ResetKeyboardModifiers", "PS_ObserveKeyboardModifier", "PS_ObserveMouseModifiers",
+        "PS_ExecuteEditorKey", "PS_HandleKeyDown", "PS_HandleKeyUp",
+    ) + r'''
+// Physical input observations are independent of LotCraft's logical flags.
+void PressKey(int key,uint flags=0){
+  if(key==16 || key==160 || key==161){
+    physical_shift_keys|=(key==161 || (key==16 && (flags&0xff)==0x36))?2:1;
+    native_shift=0x8000;windows_shift=-32768;
+  }
+  if(key==17 || key==162 || key==163){
+    physical_ctrl_keys|=(key==163 || (key==17 && (flags&0x100)))?2:1;
+    native_ctrl=0x8000;windows_ctrl=-32768;
+  }
+  PS_HandleKeyDown(key,flags);
+}
+void ReleaseKey(int key,uint flags=0){
+  if(key==16 || key==160 || key==161){
+    physical_shift_keys&=~((key==161 || (key==16 && (flags&0xff)==0x36))?2U:1U);
+    native_shift=physical_shift_keys?0x8000:0;windows_shift=physical_shift_keys?-32768:0;
+  }
+  if(key==17 || key==162 || key==163){
+    physical_ctrl_keys&=~((key==163 || (key==17 && (flags&0x100)))?2U:1U);
+    native_ctrl=physical_ctrl_keys?0x8000:0;windows_ctrl=physical_ctrl_keys?-32768:0;
+  }
+  PS_HandleKeyUp(key,flags);
+}
+'''
 
 
 @pytest.mark.parametrize(("cursor", "anchor", "expected"), [
@@ -207,7 +251,7 @@ def test_ctrl_c_copies_selected_text_without_committing_or_recalculating(tmp_pat
     source = keyboard_source() + f'''
 int main() {{
   g_editor.cursor={cursor};g_editor.anchor={anchor};
-  PS_HandleKeyDown(17);PS_HandleKeyDown(67);
+  PressKey(17);PressKey(67);
   assert(clipboard_text=="{expected}" && clipboard_calls==1);
   assert(g_editor.raw_text=="1.12345" && g_editor.active && g_editor.has_selection);
   assert(g_editor.cursor=={cursor} && g_editor.anchor=={anchor} && recalculations==0);
@@ -219,9 +263,9 @@ int main() {{
 def test_plain_c_and_ctrl_c_without_selection_do_not_overwrite_clipboard(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
-  PS_HandleKeyDown(67);assert(clipboard_calls==0);
+  PressKey(67);assert(clipboard_calls==0);
   g_editor.has_selection=false;g_editor.anchor=g_editor.cursor;
-  PS_HandleKeyDown(17);PS_HandleKeyDown(67);
+  PressKey(17);PressKey(67);
   assert(clipboard_calls==0 && clipboard_text=="unchanged" && recalculations==0);
 }
 ''')
@@ -238,7 +282,7 @@ int main(){
       g_editor.field=field;g_editor.raw_text=raw;g_editor.cursor=int(raw.size());
       g_editor.anchor=g_editor.cursor;g_editor.has_selection=false;
       int previous_calls=clipboard_calls;
-      PS_HandleKeyDown(17);PS_HandleKeyDown(65);PS_HandleKeyDown(67);
+      PressKey(17);PressKey(65);PressKey(67);
       assert(clipboard_text==raw && clipboard_calls==previous_calls+1);
       assert(g_editor.raw_text==raw && g_editor.active && g_editor.has_selection);
       assert(g_editor.cursor==int(raw.size()) && g_editor.anchor==0 && recalculations==0);
@@ -253,7 +297,7 @@ def test_failed_selection_copy_preserves_editor_and_previous_clipboard(tmp_path)
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
   g_copy_feedback_control=PS_CTRL_STOP_COPY;g_copy_feedback_until_ms=3200;
-  clipboard_ok=false;PS_HandleKeyDown(17);PS_HandleKeyDown(67);
+  clipboard_ok=false;PressKey(17);PressKey(67);
   assert(clipboard_text=="unchanged" && clipboard_calls==1 && status_error && warning_calls==1);
   assert(g_copy_feedback_control==PS_CTRL_NONE && g_copy_feedback_until_ms==0);
   assert(g_editor.active && g_editor.raw_text=="1.12345" && g_editor.has_selection);
@@ -265,9 +309,9 @@ int main(){
 def test_held_ctrl_without_modifier_key_event_selects_and_copies(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
-  native_key_states=true;native_ctrl=0x8000;
+  native_ctrl=0x8000;windows_ctrl=-32768;
   g_editor.has_selection=false;g_editor.anchor=g_editor.cursor;
-  PS_HandleKeyDown(65);PS_HandleKeyDown(67);
+  PressKey(65);PressKey(67);
   assert(clipboard_calls==1 && clipboard_text=="1.12345");
   assert(g_editor.has_selection && g_editor.anchor==0 && g_editor.cursor==7);
   assert(recalculations==0);
@@ -275,11 +319,189 @@ int main(){
 ''')
 
 
-def test_modifier_release_without_keyup_does_not_leave_stuck_shortcut(tmp_path):
+def test_windows_ctrl_state_works_when_terminal_modifier_observation_is_zero(tmp_path):
+    # Break caught: relying only on TerminalInfoInteger ignores a held Ctrl
+    # that Windows reports independently. No modifier key event is injected.
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
-  native_key_states=true;native_ctrl=0;g_ctrl_down=true;
-  PS_HandleKeyDown(67);
+  dll_allowed=true;native_ctrl=0;windows_ctrl=-32768;
+  g_editor.has_selection=false;g_editor.anchor=g_editor.cursor;
+  PressKey(65);PressKey(67);
+  assert(g_editor.has_selection && g_editor.cursor==7 && g_editor.anchor==0);
+  assert(clipboard_calls==1 && clipboard_text=="1.12345" && recalculations==0);
+  clipboard_text="2.5";PressKey(86);
+  assert(clipboard_reads==1 && g_editor.raw_text=="2.5" && recalculations==1);
+}
+''')
+
+
+def test_windows_shift_state_extends_selection_when_terminal_observation_is_zero(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  dll_allowed=true;windows_shift=-32768;
+  g_editor.has_selection=false;g_editor.cursor=3;g_editor.anchor=3;
+  PressKey(37);
+  assert(g_editor.cursor==2 && g_editor.anchor==3 && g_editor.has_selection);
+  PressKey(45);
+  assert(clipboard_reads==1);
+}
+''')
+
+
+def test_windows_modifier_release_overrides_a_stale_terminal_observation(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  dll_allowed=true;native_ctrl=0x8000;native_shift=0x8000;
+  windows_ctrl=1;windows_shift=1;g_ctrl_down=true;g_shift_down=true;
+  PressKey(67);
+  assert(clipboard_calls==0 && !g_ctrl_down && !g_shift_down);
+  PressKey(50);
+  assert(g_editor.raw_text=="2" && recalculations==1);
+}
+''')
+
+
+def test_dll_disabled_keyboard_fallback_never_calls_windows_key_api(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  dll_allowed=false;native_ctrl=0x8000;windows_ctrl=0;
+  g_editor.has_selection=false;g_editor.anchor=g_editor.cursor;
+  PressKey(65);
+  assert(g_editor.has_selection && g_editor.anchor==0 && g_editor.cursor==7);
+  ReleaseKey(17);windows_ctrl=-32768;PressKey(50);
+  assert(g_editor.raw_text=="2" && recalculations==1 && windows_key_reads==0);
+}
+''')
+
+
+@pytest.mark.parametrize("key", [65, 67, 86])
+def test_delivered_ctrl_press_survives_physical_release_before_shortcut_dispatch(tmp_path, key):
+    # These are delivered events, not a claim that MT5 enqueues every event.
+    # The physical press has ended before the EA handles the shortcut.
+    compile_and_run(tmp_path, keyboard_source() + f'''
+int main(){{
+  native_ctrl=0;windows_ctrl=0;clipboard_text="2.5";
+  if({key}==65){{g_editor.has_selection=false;g_editor.anchor=g_editor.cursor;}}
+  PS_HandleKeyDown(17);PS_HandleKeyDown({key});PS_HandleKeyUp(17);
+  if({key}==65) assert(g_editor.has_selection && g_editor.anchor==0 && g_editor.cursor==7);
+  if({key}==67) assert(clipboard_calls==1 && clipboard_text=="1.12345");
+  if({key}==86) assert(clipboard_reads==1 && g_editor.raw_text=="2.5");
+  assert(!g_ctrl_down);
+}}
+''')
+
+
+def test_delivered_shift_press_survives_physical_release_before_arrow_dispatch(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  native_shift=0;windows_shift=0;
+  g_editor.has_selection=false;g_editor.cursor=3;g_editor.anchor=3;
+  PS_HandleKeyDown(16);PS_HandleKeyDown(37);PS_HandleKeyUp(16);
+  assert(g_editor.has_selection && g_editor.cursor==2 && g_editor.anchor==3 && !g_shift_down);
+}
+''')
+
+
+def test_known_ctrl_release_does_not_inject_future_ctrl_into_older_plain_v(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  PS_HandleKeyUp(17);windows_ctrl=-32768;
+  PS_HandleKeyDown(86);
+  assert(clipboard_reads==0 && g_editor.raw_text=="1.12345" && !g_ctrl_down);
+}
+''')
+
+
+def test_known_shift_release_does_not_turn_older_delete_into_cut(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  PS_HandleKeyUp(16);windows_shift=-32768;
+  g_editor.has_selection=false;g_editor.cursor=3;g_editor.anchor=3;
+  PS_HandleKeyDown(46);
+  assert(g_editor.raw_text=="1.1345" && clipboard_calls==0 && !g_shift_down);
+}
+''')
+
+
+@pytest.mark.parametrize(("left", "right", "shortcut"), [(162, 163, 67), (160, 161, 37)])
+def test_releasing_one_modifier_side_preserves_the_other_delivered_side(tmp_path, left, right, shortcut):
+    compile_and_run(tmp_path, keyboard_source() + f'''
+int main(){{
+  if({left}==160){{g_editor.has_selection=false;g_editor.cursor=3;g_editor.anchor=3;}}
+  PS_HandleKeyDown({left});PS_HandleKeyDown({right});PS_HandleKeyUp({left});
+  if({left}==162)windows_ctrl=-32768;else windows_shift=-32768;
+  PS_HandleKeyDown({shortcut});
+  if({left}==162)assert(g_ctrl_down && clipboard_calls==1 && clipboard_text=="1.12345");
+  else assert(g_shift_down && g_editor.has_selection && g_editor.cursor==2 && g_editor.anchor==3);
+  PS_HandleKeyUp({right});assert(!g_ctrl_down && !g_shift_down);
+}}
+''')
+
+
+def test_mouse_event_snapshot_recovers_missing_release_and_held_modifiers(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  PS_HandleKeyDown(17);PS_ObserveMouseModifiers(0);PressKey(50);
+  assert(g_editor.raw_text=="2" && !g_ctrl_down && !g_shift_down);
+  PS_ObserveMouseModifiers(8);PS_HandleKeyDown(65);PS_HandleKeyDown(67);
+  assert(clipboard_text=="2" && clipboard_calls==1 && g_ctrl_down);
+  PS_ObserveMouseModifiers(0);PS_HandleKeyDown(39);
+  PS_ObserveMouseModifiers(4);PS_HandleKeyDown(37);
+  assert(g_editor.has_selection && g_editor.anchor==1 && g_editor.cursor==0);
+  assert(g_shift_down && !g_ctrl_down);
+}
+''')
+
+
+@pytest.mark.parametrize(("key", "left_flags", "right_flags", "shortcut"), [
+    (17, 0x1D, 0x11D, 67), (16, 0x2A, 0x36, 37),
+])
+def test_generic_modifier_events_use_mql_scan_and_extended_flags(tmp_path, key, left_flags, right_flags, shortcut):
+    compile_and_run(tmp_path, keyboard_source() + f'''
+int main(){{
+  if({key}==16){{g_editor.has_selection=false;g_editor.cursor=3;g_editor.anchor=3;}}
+  PressKey({key},{left_flags});PressKey({key},{right_flags});ReleaseKey({key},{left_flags});
+  PS_HandleKeyDown({shortcut});
+  if({key}==17)assert(g_ctrl_down && windows_ctrl==-32768 && clipboard_calls==1);
+  else assert(g_shift_down && windows_shift==-32768 && g_editor.has_selection && g_editor.cursor==2);
+  ReleaseKey({key},{right_flags});assert(!g_ctrl_down && !g_shift_down);
+}}
+''')
+
+
+@pytest.mark.parametrize(("left", "right", "mask", "shortcut"), [(162, 163, 8, 67), (160, 161, 4, 37)])
+def test_held_mouse_snapshot_preserves_delivered_modifier_sides(tmp_path, left, right, mask, shortcut):
+    compile_and_run(tmp_path, keyboard_source() + f'''
+int main(){{
+  if({left}==160){{g_editor.has_selection=false;g_editor.cursor=3;g_editor.anchor=3;}}
+  PressKey({left});PressKey({right});PS_ObserveMouseModifiers({mask});ReleaseKey({left});
+  PS_HandleKeyDown({shortcut});
+  if({left}==162)assert(g_ctrl_down && windows_ctrl==-32768 && clipboard_calls==1);
+  else assert(g_shift_down && windows_shift==-32768 && g_editor.has_selection && g_editor.cursor==2);
+  ReleaseKey({right});assert(!g_ctrl_down && !g_shift_down);
+  PS_ObserveMouseModifiers(0);assert(g_ctrl_pressed_keys==0 && g_shift_pressed_keys==0);
+}}
+''')
+
+
+@pytest.mark.parametrize("control", [17, 162, 163])
+def test_ctrl_release_restores_plain_typing_after_shortcut(tmp_path, control):
+    compile_and_run(tmp_path, keyboard_source() + f'''
+int main(){{
+  PressKey({control});PressKey(65);PressKey(67);
+  assert(clipboard_calls==1 && clipboard_text=="1.12345");
+  ReleaseKey({control});assert(!g_ctrl_down);
+  PressKey(50);
+  assert(g_editor.raw_text=="2" && recalculations==1 && clipboard_calls==1);
+}}
+''')
+
+
+def test_unknown_modifier_seed_does_not_reuse_old_logical_flag(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  native_ctrl=0;g_ctrl_down=true;
+  PressKey(67);
   assert(clipboard_calls==0 && !g_ctrl_down && clipboard_text=="unchanged");
 }
 ''')
@@ -297,7 +519,7 @@ def test_ctrl_v_replaces_selection_or_inserts_at_cursor(tmp_path, cursor, anchor
 int main(){{
   g_editor.cursor={cursor};g_editor.anchor={anchor};g_editor.has_selection={str(selected).lower()};
   clipboard_text={json.dumps(paste)};
-  PS_HandleKeyDown(17);PS_HandleKeyDown(86);
+  PressKey(17);PressKey(86);
   assert(g_editor.raw_text=="{expected}" && clipboard_reads==1 && recalculations==1);
   assert(!g_editor.has_selection && g_editor.active);
 }}
@@ -309,7 +531,7 @@ def test_invalid_paste_is_atomic_and_does_not_recalculate(tmp_path, paste):
     import json
     compile_and_run(tmp_path, keyboard_source() + f'''
 int main(){{
-  clipboard_text={json.dumps(paste)};PS_HandleKeyDown(17);PS_HandleKeyDown(86);
+  clipboard_text={json.dumps(paste)};PressKey(17);PressKey(86);
   assert(g_editor.raw_text=="1.12345" && g_editor.cursor==7 && g_editor.anchor==0 && g_editor.has_selection);
   assert(clipboard_reads==1 && recalculations==0 && status_error);
 }}
@@ -319,9 +541,9 @@ int main(){{
 def test_cut_only_deletes_after_successful_copy(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
-  PS_HandleKeyDown(17);clipboard_ok=false;PS_HandleKeyDown(88);
+  PressKey(17);clipboard_ok=false;PressKey(88);
   assert(g_editor.raw_text=="1.12345" && g_editor.has_selection && recalculations==0);
-  clipboard_ok=true;PS_HandleKeyDown(88);
+  clipboard_ok=true;PressKey(88);
   assert(clipboard_text=="1.12345" && g_editor.raw_text.empty() && !g_editor.has_selection);
   assert(recalculations==1);
 }
@@ -331,12 +553,12 @@ int main(){
 def test_numeric_edit_undo_redo_restores_selection_and_rejects_old_redo(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
-  PS_HandleKeyDown(50);assert(g_editor.raw_text=="2");
-  PS_HandleKeyDown(17);PS_HandleKeyDown(90);
+  PressKey(50);assert(g_editor.raw_text=="2");
+  PressKey(17);PressKey(90);
   assert(g_editor.raw_text=="1.12345" && g_editor.has_selection && g_editor.anchor==0);
-  PS_HandleKeyDown(89);assert(g_editor.raw_text=="2");
-  PS_HandleKeyDown(90);g_ctrl_down=false;PS_HandleKeyDown(51);
-  assert(g_editor.raw_text=="3");g_ctrl_down=true;PS_HandleKeyDown(89);
+  PressKey(89);assert(g_editor.raw_text=="2");
+  PressKey(90);ReleaseKey(17);PressKey(51);
+  assert(g_editor.raw_text=="3");PressKey(17);PressKey(89);
   assert(g_editor.raw_text=="3");
 }
 ''')
@@ -346,10 +568,10 @@ def test_ctrl_navigation_shift_selection_and_whole_number_deletion(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
   g_editor.has_selection=false;g_editor.anchor=g_editor.cursor;
-  PS_HandleKeyDown(17);PS_HandleKeyDown(37);assert(g_editor.cursor==0);
-  PS_HandleKeyDown(16);PS_HandleKeyDown(39);
+  PressKey(17);PressKey(37);assert(g_editor.cursor==0);
+  PressKey(16);PressKey(39);
   assert(g_editor.cursor==7 && g_editor.anchor==0 && g_editor.has_selection);
-  g_shift_down=false;PS_HandleKeyDown(8);assert(g_editor.raw_text.empty());
+  ReleaseKey(16);PressKey(8);assert(g_editor.raw_text.empty());
 }
 ''')
 
@@ -358,9 +580,32 @@ def test_noop_edit_keys_do_not_reapply_model_or_recalculate(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
   g_editor.has_selection=false;g_editor.cursor=0;g_editor.anchor=0;
-  PS_HandleKeyDown(8);assert(recalculations==0);
-  g_editor.cursor=7;g_editor.anchor=7;PS_HandleKeyDown(46);assert(recalculations==0);
-  PS_HandleKeyDown(17);PS_HandleKeyDown(49);assert(g_editor.raw_text=="1.12345" && recalculations==0);
+  PressKey(8);assert(recalculations==0);
+  g_editor.cursor=7;g_editor.anchor=7;PressKey(46);assert(recalculations==0);
+  PressKey(17);PressKey(49);assert(g_editor.raw_text=="1.12345" && recalculations==0);
+}
+''')
+
+
+def test_modifier_events_do_not_repaint_or_recalculate_before_shortcut(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  for(int key:{16,160,161,17,162,163}){PressKey(key);ReleaseKey(key);}
+  assert(keyboard_renders==0 && recalculations==0 && !g_ui.dirty);
+  assert(g_editor.raw_text=="1.12345" && g_editor.has_selection);
+}
+''')
+
+
+def test_editor_redraw_is_deferred_to_existing_frame_timer(tmp_path):
+    compile_and_run(tmp_path, keyboard_source() + r'''
+int main(){
+  PressKey(50);
+  assert(g_editor.raw_text=="2" && recalculations==1 && g_ui.dirty);
+  assert(keyboard_renders==0);
+  PressKey(17);PressKey(65);PressKey(67);
+  assert(clipboard_calls==1 && clipboard_text=="2" && g_editor.has_selection);
+  assert(keyboard_renders==0 && g_ui.dirty);
 }
 ''')
 
@@ -394,25 +639,26 @@ def test_selection_navigation_delete_and_numeric_keypad_matrix(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 void reset(const string &text,int cursor,int anchor){
   g_editor=PSEditorState{};g_editor.raw_text=text;g_editor.cursor=cursor;g_editor.anchor=anchor;
-  g_editor.has_selection=cursor!=anchor;g_ctrl_down=false;g_shift_down=false;
+  g_editor.has_selection=cursor!=anchor;native_ctrl=0;windows_ctrl=0;native_shift=0;windows_shift=0;
+  PS_ResetKeyboardModifiers();
 }
 int main(){
-  reset("123.45",5,2);PS_HandleKeyDown(37);assert(g_editor.cursor==2 && !g_editor.has_selection);
-  reset("123.45",2,5);PS_HandleKeyDown(39);assert(g_editor.cursor==5 && !g_editor.has_selection);
-  reset("123.45",3,3);native_key_states=true;native_shift=0x8000;
-  PS_HandleKeyDown(36);assert(g_editor.cursor==0 && g_editor.anchor==3 && g_editor.has_selection);
-  PS_HandleKeyDown(35);assert(g_editor.cursor==6 && g_editor.anchor==3);
-  native_shift=0;PS_HandleKeyDown(38);assert(g_editor.cursor==0 && !g_editor.has_selection);
-  PS_HandleKeyDown(40);assert(g_editor.cursor==6);native_key_states=false;
-  reset("123.45",3,3);PS_HandleKeyDown(8);assert(g_editor.raw_text=="12.45");
-  reset("123.45",3,3);PS_HandleKeyDown(46);assert(g_editor.raw_text=="12345");
-  reset("123.45",3,3);g_ctrl_down=true;PS_HandleKeyDown(8);assert(g_editor.raw_text==".45");
-  reset("123.45",3,3);g_ctrl_down=true;PS_HandleKeyDown(46);assert(g_editor.raw_text=="123");
-  reset("123.45",2,5);PS_HandleKeyDown(46);assert(g_editor.raw_text=="125");
-  reset("123.45",6,0);PS_HandleKeyDown(98);PS_HandleKeyDown(110);PS_HandleKeyDown(101);
+  reset("123.45",5,2);PressKey(37);assert(g_editor.cursor==2 && !g_editor.has_selection);
+  reset("123.45",2,5);PressKey(39);assert(g_editor.cursor==5 && !g_editor.has_selection);
+  reset("123.45",3,3);native_shift=0x8000;windows_shift=-32768;
+  PressKey(36);assert(g_editor.cursor==0 && g_editor.anchor==3 && g_editor.has_selection);
+  PressKey(35);assert(g_editor.cursor==6 && g_editor.anchor==3);
+  ReleaseKey(16);PressKey(38);assert(g_editor.cursor==0 && !g_editor.has_selection);
+  PressKey(40);assert(g_editor.cursor==6);
+  reset("123.45",3,3);PressKey(8);assert(g_editor.raw_text=="12.45");
+  reset("123.45",3,3);PressKey(46);assert(g_editor.raw_text=="12345");
+  reset("123.45",3,3);native_ctrl=0x8000;windows_ctrl=-32768;PressKey(8);assert(g_editor.raw_text==".45");
+  reset("123.45",3,3);native_ctrl=0x8000;windows_ctrl=-32768;PressKey(46);assert(g_editor.raw_text=="123");
+  reset("123.45",2,5);PressKey(46);assert(g_editor.raw_text=="125");
+  reset("123.45",6,0);PressKey(98);PressKey(110);PressKey(101);
   assert(g_editor.raw_text=="2.5");
-  reset("123.45",6,0);PS_HandleKeyDown(109);PS_HandleKeyDown(100);assert(g_editor.raw_text=="-4");
-  reset("123.45",6,0);PS_HandleKeyDown(107);PS_HandleKeyDown(99);PS_HandleKeyDown(188);PS_HandleKeyDown(102);
+  reset("123.45",6,0);PressKey(109);PressKey(100);assert(g_editor.raw_text=="-4");
+  reset("123.45",6,0);PressKey(107);PressKey(99);PressKey(188);PressKey(102);
   assert(g_editor.raw_text=="+3,6");
 }
 ''')
@@ -421,14 +667,14 @@ int main(){
 def test_clipboard_aliases_cut_without_selection_and_shift_ctrl_redo(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
-  PS_HandleKeyDown(17);PS_HandleKeyDown(45);assert(clipboard_text=="1.12345");
-  g_ctrl_down=false;PS_HandleKeyDown(16);PS_HandleKeyDown(46);
+  PressKey(17);PressKey(45);assert(clipboard_text=="1.12345");
+  ReleaseKey(17);PressKey(16);PressKey(46);
   assert(clipboard_text=="1.12345" && g_editor.raw_text.empty());
-  g_shift_down=false;g_ctrl_down=true;PS_HandleKeyDown(90);assert(g_editor.raw_text=="1.12345");
-  g_shift_down=true;PS_HandleKeyDown(90);assert(g_editor.raw_text.empty());
-  g_ctrl_down=false;clipboard_text="2,5";PS_HandleKeyDown(45);
+  ReleaseKey(16);PressKey(17);PressKey(90);assert(g_editor.raw_text=="1.12345");
+  PressKey(16);PressKey(90);assert(g_editor.raw_text.empty());
+  ReleaseKey(17);clipboard_text="2,5";PressKey(45);
   assert(g_editor.raw_text=="2,5");
-  g_shift_down=false;g_ctrl_down=true;int calls=clipboard_calls;PS_HandleKeyDown(88);
+  ReleaseKey(16);PressKey(17);int calls=clipboard_calls;PressKey(88);
   assert(g_editor.raw_text=="2,5" && clipboard_calls==calls);
 }
 ''')
@@ -437,14 +683,14 @@ int main(){
 def test_bounded_history_keeps_latest_31_changes_and_redoes_after_navigation(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
-  g_ctrl_down=true;
+  native_ctrl=0x8000;windows_ctrl=-32768;
   for(int i=0;i<40;i++){
-    PS_HandleKeyDown(65);clipboard_text=DoubleToString(i,0);PS_HandleKeyDown(86);
+    PressKey(65);clipboard_text=DoubleToString(i,0);PressKey(86);
     assert(g_editor.history_count<=32 && g_editor.history_index<32);
   }
-  for(int i=0;i<40;i++)PS_HandleKeyDown(90);
-  assert(g_editor.raw_text=="8");PS_HandleKeyDown(35);
-  for(int i=0;i<40;i++)PS_HandleKeyDown(89);
+  for(int i=0;i<40;i++)PressKey(90);
+  assert(g_editor.raw_text=="8");PressKey(35);
+  for(int i=0;i<40;i++)PressKey(89);
   assert(g_editor.raw_text=="39" && g_editor.cursor==2);
 }
 ''')
@@ -456,10 +702,10 @@ def test_paste_undo_redo_updates_real_valid_stop_preview(tmp_path):
         "bool PS_EditorApplyRaw(PSEditorState&,PSModel&,const PSMarketSnapshot&,bool,string&);",
     ) + "\n" + extract_function(EDITOR, "PS_EditorApplyRaw") + r'''
 int main(){
-  g_ctrl_down=true;clipboard_text="1.22345";PS_HandleKeyDown(86);
+  native_ctrl=0x8000;windows_ctrl=-32768;clipboard_text="1.22345";PressKey(86);
   assert(std::abs(g_model.stop_loss-1.22345)<1e-12);
-  PS_HandleKeyDown(90);assert(std::abs(g_model.stop_loss-1.12345)<1e-12);
-  PS_HandleKeyDown(89);assert(std::abs(g_model.stop_loss-1.22345)<1e-12);
+  PressKey(90);assert(std::abs(g_model.stop_loss-1.12345)<1e-12);
+  PressKey(89);assert(std::abs(g_model.stop_loss-1.22345)<1e-12);
   assert(g_model.entry==1.23456 && g_model.requested_risk_percent==1);
 }
 '''
@@ -484,15 +730,15 @@ def test_undo_incomplete_text_restores_its_prior_model_preview(tmp_path, field, 
 int main(){{
   g_editor.field={field};g_model.risk_authority={authority};
   g_editor.raw_text="{initial}";g_editor.cursor=StringLen(g_editor.raw_text);g_editor.anchor=0;
-  PS_HandleKeyDown(46);assert(g_editor.raw_text.empty());
-  g_ctrl_down=true;clipboard_text="2";PS_HandleKeyDown(86);
+  PressKey(46);assert(g_editor.raw_text.empty());
+  PressKey(17);clipboard_text="2";PressKey(86);
   assert(g_model.{member}==2);
   g_model.direction=PS_DIRECTION_SHORT;g_model.order_mode=PS_ORDER_INSTANT;
-  PS_HandleKeyDown(90);
+  PressKey(90);
   assert(g_editor.raw_text.empty() && std::abs(g_model.{member}-{initial})<1e-12);
   assert(g_model.risk_authority=={authority});
   assert(g_model.direction==PS_DIRECTION_SHORT && g_model.order_mode==PS_ORDER_INSTANT);
-  PS_HandleKeyDown(89);assert(g_editor.raw_text=="2" && g_model.{member}==2);
+  PressKey(89);assert(g_editor.raw_text=="2" && g_model.{member}==2);
 }}
 '''
     compile_and_run(tmp_path, source)
@@ -501,7 +747,7 @@ int main(){{
 def test_failed_clipboard_read_preserves_selection_without_logging_value(tmp_path):
     compile_and_run(tmp_path, keyboard_source() + r'''
 int main(){
-  clipboard_read_ok=false;clipboard_text="998877.66";g_ctrl_down=true;PS_HandleKeyDown(86);
+  clipboard_read_ok=false;clipboard_text="998877.66";native_ctrl=0x8000;windows_ctrl=-32768;PressKey(86);
   assert(g_editor.raw_text=="1.12345" && g_editor.cursor==7 && g_editor.anchor==0 && g_editor.has_selection);
   assert(recalculations==0 && status_error && warning_calls==1 && clipboard_reads==1);
   assert(last_warning=="Windows clipboard is currently unavailable.");
@@ -523,16 +769,16 @@ void PS_CancelEditor(){PS_EditorCancel(g_editor,g_model);}
 bool PS_CommitEditor(){string error;return PS_EditorCommit(g_editor,g_model,g_market,error);}
 int main(){
   PS_EditorBegin(g_editor,PS_FIELD_STOP,g_model,g_market);PS_EditorSelectAll(g_editor);
-  PS_HandleKeyDown(50);assert(g_model.stop_loss==2 && g_editor.history_count==2);
-  PS_HandleKeyDown(27);
+  PressKey(50);assert(g_model.stop_loss==2 && g_editor.history_count==2);
+  PressKey(27);
   assert(!g_editor.active && g_editor.history_count==0 && std::abs(g_model.stop_loss-1.12345)<1e-12);
   PS_EditorBegin(g_editor,PS_FIELD_STOP,g_model,g_market);PS_EditorSelectAll(g_editor);
-  PS_HandleKeyDown(50);PS_HandleKeyDown(13);
+  PressKey(50);PressKey(13);
   assert(!g_editor.active && g_editor.history_count==0 && g_model.stop_loss==2);
   PS_EditorBegin(g_editor,PS_FIELD_STOP,g_model,g_market);PS_EditorSelectAll(g_editor);
-  PS_HandleKeyDown(51);assert(g_editor.history_count==2);
+  PressKey(51);assert(g_editor.history_count==2);
   PS_EditorBegin(g_editor,PS_FIELD_RISK_PERCENT,g_model,g_market);
-  g_ctrl_down=true;PS_HandleKeyDown(90);
+  native_ctrl=0x8000;windows_ctrl=-32768;PressKey(90);
   assert(g_editor.raw_text=="1.0000" && g_editor.history_count==0);
 }
 '''

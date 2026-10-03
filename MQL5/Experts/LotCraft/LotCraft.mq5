@@ -23,6 +23,14 @@ bool   g_initialized=false;
 bool   g_trade_in_flight=false;
 bool   g_shift_down=false;
 bool   g_ctrl_down=false;
+bool   g_shift_state_known=false;
+bool   g_ctrl_state_known=false;
+uint   g_shift_pressed_keys=0;
+uint   g_ctrl_pressed_keys=0;
+uint   g_shortcut_keydowns=0;
+bool   g_shortcut_ctrl_context=false;
+bool   g_shortcut_shift_context=false;
+PSFieldId g_shortcut_field=PS_FIELD_NONE;
 ulong  g_last_market_refresh_ms=0;
 ulong  g_last_exposure_refresh_ms=0;
 ulong  g_exposure_retry_after_ms=0;
@@ -159,8 +167,7 @@ void PS_AbortInteractionForContextChange()
    g_keyboard_focus=PS_CTRL_NONE;
    g_pressed_control=PS_CTRL_NONE;
    g_hovered_control=PS_CTRL_NONE;
-   g_shift_down=false;
-   g_ctrl_down=false;
+   PS_ResetKeyboardModifiers();
    PS_UIGuardExit(g_ui);
   }
 
@@ -323,6 +330,7 @@ void PS_RenderIfDirty()
 
 bool PS_CommitEditor()
   {
+   PS_ResetShortcutContext();
    if(!g_editor.active) return(true);
    PSFieldId field=g_editor.field;
    string error="";
@@ -354,6 +362,7 @@ bool PS_CommitEditor()
 
 void PS_CancelEditor()
   {
+   PS_ResetShortcutContext();
    if(!g_editor.active) return;
    PS_EditorCancel(g_editor,g_model);
    PS_ClearTransientStatus();
@@ -960,6 +969,7 @@ void PS_ResetCapture(const int x,const int y)
 
 void PS_MousePress(const int x,const int y)
   {
+   PS_ResetShortcutContext();
    if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready) return;
    ulong started=GetMicrosecondCount();
    int native_x=0;
@@ -1288,6 +1298,7 @@ void PS_MouseRelease(const int x,const int y)
 
 void PS_HandleMouseEvent(const int x,const int y,const uint mask)
   {
+   PS_ObserveMouseModifiers(mask);
    bool left=((mask & 1)==1);
    bool was_left=((g_pointer.last_mouse_mask & 1)==1);
 
@@ -1316,8 +1327,96 @@ void PS_HandleMouseEvent(const int x,const int y,const uint mask)
    g_pointer.last_mouse_mask=mask;
   }
 
+void PS_ResetShortcutContext()
+  {
+   g_shortcut_keydowns=0;
+   g_shortcut_ctrl_context=false;
+   g_shortcut_shift_context=false;
+   g_shortcut_field=PS_FIELD_NONE;
+  }
+
+void PS_RecordShortcutContext()
+  {
+   g_shortcut_ctrl_context=g_ctrl_down;
+   g_shortcut_shift_context=g_shift_down;
+   g_shortcut_field=(g_editor.active ? g_editor.field : PS_FIELD_NONE);
+  }
+
+uint PS_KeyboardShortcutBit(const int key)
+  {
+   switch(key)
+     {
+      case 65: return(1);     // Select all.
+      case 67: return(2);     // Copy.
+      case 86: return(4);     // Paste.
+      case 88: return(8);     // Cut.
+      case 90: return(16);    // Undo / redo.
+      case 89: return(32);    // Redo.
+      case 45: return(64);    // Ctrl/Shift Insert.
+      case 46: return(128);   // Ctrl/Shift Delete.
+      case 8:  return(256);   // Ctrl Backspace.
+      case 37: return(512);   // Modified caret movement / selection.
+      case 39: return(1024);
+      case 36: return(2048);
+      case 35: return(4096);
+      case 38: return(8192);
+      case 40: return(16384);
+     }
+   return(0);
+  }
+
+void PS_ResetKeyboardModifiers()
+  {
+   PS_ResetShortcutContext();
+   g_shift_down=false;
+   g_ctrl_down=false;
+   g_shift_state_known=false;
+   g_ctrl_state_known=false;
+   g_shift_pressed_keys=0;
+   g_ctrl_pressed_keys=0;
+  }
+
+void PS_ObserveKeyboardModifier(const int key,const uint flags,const bool down)
+  {
+   uint side=PS_PlatformModifierSide(key,flags);
+   if(side==0) return;
+   // Bits 1/2 preserve independently delivered left/right presses. Bit 4 is
+   // an aggregate seed or mouse snapshot with no side information; a delivered
+   // release clears that seed, but not the other explicitly pressed side.
+   if(key==16 || key==160 || key==161)
+     {
+      if(down) g_shift_pressed_keys|=side;
+      else g_shift_pressed_keys&=~(side | (uint)4);
+      g_shift_down=(g_shift_pressed_keys!=0);
+      g_shift_state_known=true;
+     }
+   else
+     {
+      if(down) g_ctrl_pressed_keys|=side;
+      else g_ctrl_pressed_keys&=~(side | (uint)4);
+      g_ctrl_down=(g_ctrl_pressed_keys!=0);
+      g_ctrl_state_known=true;
+     }
+  }
+
+void PS_ObserveMouseModifiers(const uint mask)
+  {
+   // Mouse masks describe modifier state at event generation, not dispatch.
+   g_shift_down=((mask & 4)!=0);
+   g_ctrl_down=((mask & 8)!=0);
+   g_shift_state_known=true;
+   g_ctrl_state_known=true;
+   // A held snapshot has no side information. Preserve delivered side identity;
+   // only a released snapshot can clear every held side without ambiguity.
+   if(g_shift_down) g_shift_pressed_keys|=4;
+   else g_shift_pressed_keys=0;
+   if(g_ctrl_down) g_ctrl_pressed_keys|=4;
+   else g_ctrl_pressed_keys=0;
+  }
+
 void PS_KeyboardFocusNext(const bool reverse)
   {
+   PS_ResetShortcutContext();
    PSControlId order[10];
    order[0]=PS_CTRL_ENTRY_FIELD;
    order[1]=PS_CTRL_STOP_FIELD;
@@ -1356,15 +1455,41 @@ void PS_KeyboardFocusNext(const bool reverse)
      }
   }
 
-void PS_HandleKeyDown(const int key)
+void PS_HandleKeyDown(const int key,const uint flags=0)
   {
    if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready) return;
-   // Modifiers can already be held when this chart receives focus. Do not
-   // require a preceding modifier event or retain a missed release event.
-   g_shift_down=((TerminalInfoInteger(TERMINAL_KEYSTATE_SHIFT) & 0x8000)!=0);
-   g_ctrl_down=((TerminalInfoInteger(TERMINAL_KEYSTATE_CONTROL) & 0x8000)!=0);
-   if(key==16 || key==160 || key==161) g_shift_down=true;
-   if(key==17 || key==162 || key==163) g_ctrl_down=true;
+   // Seed unknown state once. Delivered modifier events then own both the
+   // pressed and released state, even when this handler runs after release.
+   if(!g_shift_state_known || !g_ctrl_state_known)
+     {
+      bool shift_down=false;
+      bool ctrl_down=false;
+      PS_PlatformKeyboardModifiers(shift_down,ctrl_down);
+      if(!g_shift_state_known)
+        {
+         g_shift_down=shift_down; g_shift_state_known=true;
+         g_shift_pressed_keys=(shift_down ? 4 : 0);
+        }
+      if(!g_ctrl_state_known)
+        {
+         g_ctrl_down=ctrl_down; g_ctrl_state_known=true;
+         g_ctrl_pressed_keys=(ctrl_down ? 4 : 0);
+        }
+     }
+   PS_ObserveKeyboardModifier(key,flags,true);
+   // Modifier presses change no visible editor state. Keep this event short
+   // so a following shortcut is not delayed by a needless panel repaint.
+   if(key==16 || key==17 || (key>=160 && key<=163))
+     {
+      // Only a new modifier press starts a gesture. An auto-repeat must not
+      // erase Shift/Ctrl already released before a swallowed letter press.
+      if((flags & 0x4000)==0) PS_RecordShortcutContext();
+      return;
+     }
+   // A delivered ordinary press starts its own context, so a previous Ctrl
+   // tap cannot turn a later plain letter release into a clipboard command.
+   PS_RecordShortcutContext();
+   g_shortcut_keydowns|=PS_KeyboardShortcutBit(key);
    if(key==9)
      {
       PS_KeyboardFocusNext(g_shift_down);
@@ -1390,13 +1515,18 @@ void PS_HandleKeyDown(const int key)
       PS_Action(g_keyboard_focus);
       return;
      }
+   PS_ExecuteEditorKey(key,g_shift_down,g_ctrl_down);
+  }
+
+void PS_ExecuteEditorKey(const int key,const bool shift_down,const bool ctrl_down)
+  {
    if(!g_editor.active) return;
    PS_UIGuardEnter(g_ui);
 
    string before_text=g_editor.raw_text;
    int before_cursor=g_editor.cursor;
    int before_anchor=g_editor.anchor;
-   PSEditKeyResult result=PS_EditorKey(g_editor,key,g_shift_down,g_ctrl_down);
+   PSEditKeyResult result=PS_EditorKey(g_editor,key,shift_down,ctrl_down);
    bool restoring_history=(result==PS_EDIT_KEY_UNDO || result==PS_EDIT_KEY_REDO);
    if(restoring_history)
      {
@@ -1443,14 +1573,36 @@ void PS_HandleKeyDown(const int key)
       int length=PS_EditorSelectionEnd(g_editor)-first;
       if(length>0) PS_CopyText(StringSubstr(g_editor.raw_text,first,length),"Selection");
      }
+   // The existing frame timer paints dirty editor state. Do not rasterize the
+   // whole panel inside every key event while later chart keys are waiting.
    g_ui.dirty=true;
-   PS_RenderIfDirty();
   }
 
-void PS_HandleKeyUp(const int key)
+void PS_HandleKeyUp(const int key,const uint flags=0)
   {
-   if(key==16 || key==160 || key==161) g_shift_down=false;
-   if(key==17 || key==162 || key==163) g_ctrl_down=false;
+   PS_ObserveKeyboardModifier(key,flags,false);
+   if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready)
+     {
+      PS_ResetShortcutContext();
+      return;
+     }
+   if(key==16 || key==17 || (key>=160 && key<=163)) return;
+
+   uint bit=PS_KeyboardShortcutBit(key);
+   bool press_seen=((g_shortcut_keydowns & bit)!=0);
+   g_shortcut_keydowns&=~bit;
+   bool same_editor=(g_editor.active && g_shortcut_field==g_editor.field);
+   bool ctrl_context=g_shortcut_ctrl_context;
+   bool shift_context=g_shortcut_shift_context;
+   // Preserve held modifiers for another shortcut, but consume a released
+   // modifier context once. Mouse/focus/lifecycle changes invalidate it.
+   if(same_editor) PS_RecordShortcutContext();
+   else PS_ResetShortcutContext();
+   if(bit==0 || press_seen || !same_editor || (!ctrl_context && !shift_context)) return;
+   // MT5 can consume a shortcut's KEYDOWN and deliver only its KEYUP. Use the
+   // gesture context even when Ctrl was released before the letter. A seen
+   // press above prevents duplicate copy, paste, cut or history operations.
+   PS_ExecuteEditorKey(key,shift_context,ctrl_context);
   }
 
 int PS_StepperAccelerationStage(const ulong elapsed)
@@ -1516,6 +1668,7 @@ int OnInit()
    g_pressed_control=PS_CTRL_NONE;
    g_keyboard_focus=PS_CTRL_NONE;
    g_last_exposure_refresh_ms=0;
+   PS_ResetKeyboardModifiers();
    g_exposure_retry_after_ms=0;
    g_panel_retry_after_ms=0;
    g_pointer.capture=PS_CAPTURE_NONE;
@@ -1587,6 +1740,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    g_initialized=false;
+   PS_ResetKeyboardModifiers();
    EventKillTimer();
    if(g_editor.active)
      {
@@ -1729,12 +1883,12 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
    if(!g_initialized) return;
    if(id==CHARTEVENT_KEYDOWN)
      {
-      PS_HandleKeyDown((int)lparam);
+      PS_HandleKeyDown((int)lparam,(uint)StringToInteger(sparam));
       return;
      }
    if(id==CHARTEVENT_KEYUP)
      {
-      PS_HandleKeyUp((int)lparam);
+      PS_HandleKeyUp((int)lparam,(uint)StringToInteger(sparam));
       return;
      }
    if(id==CHARTEVENT_MOUSE_MOVE)
@@ -1757,6 +1911,8 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
      }
    if(id==CHARTEVENT_MOUSE_WHEEL)
      {
+      PS_ResetShortcutContext();
+      PS_ObserveMouseModifiers((uint)(lparam>>32));
       int x=(int)(short)lparam;
       int y=(int)(short)(lparam>>16);
       if(g_exposure_ui.details_open && PS_RectContains(g_exposure_ui.sidecar_rect,x,y))
@@ -1774,6 +1930,7 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
      }
    if(id==CHARTEVENT_CLICK)
      {
+      PS_ResetShortcutContext();
       int x=(int)lparam;
       int y=(int)dparam;
       if(!PS_UIInPanel(g_ui,x,y) && g_editor.active) PS_CommitEditor();
@@ -1782,6 +1939,8 @@ void OnChartEvent(const int id,const long &lparam,const double &dparam,const str
      }
    if(id==CHARTEVENT_CHART_CHANGE)
      {
+      // A layout event can occur inside an active Ctrl+A gesture. Preserve
+      // its context; actual symbol changes abort in PS_RefreshMarket.
       PS_RefreshMarket(false);
       PS_UIClampPanel(g_ui,g_model.view_mode);
       g_ui.dirty=true;

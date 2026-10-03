@@ -42,7 +42,19 @@ Both compiler logs were read in full. MetaEditor can exit 1 despite a clean summ
 | `RELEASE-VERIFICATION.json` | 2,116 | `d809da22ff46917f1929150afce998380f9692b2a1d10e6582c5c4dc291ab59d` |
 | `LotCraft.ex5` (embedded, not uploaded separately) | 283,280 | `2e9d53b80be48f3614cfdf6129f9c8457161442d9a6ef86dab5b7a195850700c` |
 
-Only the first five artifacts are intended public assets. The EX5 is embedded in the self-contained setup. Publication and fresh-download verification are pending at this record stage.
+Only the first five artifacts are public assets. The EX5 is embedded in the self-contained setup. All uploaded sizes and digests matched local bytes before draft publication. Fresh anonymous downloads of all five assets match those same sizes and SHA-256 values. The downloaded descriptor and signature verify against the unchanged pinned Ed25519 key, the checksum text matches the downloaded setup, and its PE identity verifies as 1.2.4.0.
+
+## Public updater verification
+
+The production anonymous Checker was exercised against the published release with its existing host allowlist and pinned key. Installed-version inputs 1.2.0 and 1.2.3 both produce the signed 1.2.4 candidate. The 1.2.3 case downloads and verifies the 6,948,352-byte installer with the SHA-256 above. Installed-version input 1.2.4 correctly produces no newer candidate. The uncached delivery smoke test passes in 1.50s.
+
+This verifies release discovery, version ordering, signature validation and installer download through production functions. It does not exercise the scheduling, prompt, installed updater state or native activation. No token, terminal input or production installation was used. The temporary network-test harness and output remain in ignored evidence; the harness was removed from production source after the check.
+
+## Publication
+
+[LotCraft 1.2.4](https://github.com/saroo98/LotCraft/releases/tag/v1.2.4) is latest stable, published at 2026-10-03T13:28:16Z. Three meaningful commits separate keyboard source/regressions, native diagnostic evidence and release identity/documentation. The normal atomic push updated main and the feature branch to `8106cb985d593add6b0a49b3b052c2b4ce84043d`. The annotated v1.2.4 tag peels to that tested source. Previous release tags and assets are unchanged. No private key, raw log, terminal identifier or local installation manifest is a release asset.
+
+The final delivery-evidence follow-up changes documentation only. It does not move the release tag, change package bytes or install into the owner's terminals.
 
 ## Update timing and safety
 

@@ -147,11 +147,11 @@ using string=std::string;using ulong=unsigned long long;
 struct PSSlTarget {int id=0;};
 struct {bool ask_confirmation=true;} g_model;
 struct {double tick_size=1;bool symbol_ready=true;} g_market;
-bool g_trade_in_flight=false,g_symbol_transition_pending=false;
+bool g_trade_in_flight=false,g_symbol_transition_pending=false,g_action_from_keyboard=false;
 ulong g_last_submit_ms=0;int refreshes=0,collections=0,batches=0;
 int transition_at=0;
 const string PS_PRODUCT_NAME="LotCraft";
-enum {MB_YESNO=1,MB_ICONQUESTION=2,IDYES=6,MB_OK=0,MB_ICONWARNING=4,MB_ICONINFORMATION=8};
+enum {MB_YESNO=1,MB_ICONQUESTION=2,IDYES=6,MB_OK=0,MB_ICONWARNING=4,MB_ICONINFORMATION=8,MB_DEFBUTTON2=256};
 ulong GetTickCount64(){return 2000;}
 void PS_SetStatus(const string&,bool,int=5000){}
 bool PS_CommitEditor(){return true;}
@@ -175,6 +175,7 @@ string StringSubstr(const string& value,int start,int length){return value.subst
     # control-flow, comparison, or request logic is changed for this fixture.
     for name in ("targets", "refreshed", "final_targets"):
         body = body.replace(f"PSSlTarget {name}[];", f"std::vector<PSSlTarget> {name};")
+    source += extract_function(EA, "PS_ConfirmationFlags") + "\n"
     source += body
     source += f"\nint main(){{transition_at={transition_at};PS_DoMoveStops();std::cout<<batches<<' '<<collections;}}"
     assert compile_and_run(tmp_path, source).strip() == f"0 {transition_at - 1}"

@@ -346,6 +346,7 @@ def marker_source() -> str:
     functions = functions.replace("C'10,12,16'", "0")
     return geometry_source() + "\n" + declaration(TYPES, "PSLevelId") + r'''
 const int COLOR_FORMAT_XRGB_NOALPHA=0,CORNER_LEFT_UPPER=0,TA_CENTER=1,TA_VCENTER=4;
+void PS_UIHandleGlyphOffset(int,const string&,int,int,int &dx,int &dy){dx=0;dy=0;}
 const int OBJPROP_CORNER=0,OBJPROP_SELECTABLE=1,OBJPROP_SELECTED=2,OBJPROP_HIDDEN=3;
 const int OBJPROP_BACK=4,OBJPROP_TOOLTIP=5,OBJPROP_ZORDER=6,OBJPROP_XDISTANCE=7,OBJPROP_YDISTANCE=8;
 const int OBJPROP_TIMEFRAMES=9,OBJ_ALL_PERIODS=1,OBJ_NO_PERIODS=0,clrNONE=-1,PS_CLR_TEXT=0;

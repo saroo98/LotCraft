@@ -21,6 +21,7 @@ PSExposureUIState  g_exposure_ui;
 string g_persistence_base="";
 bool   g_initialized=false;
 bool   g_trade_in_flight=false;
+bool   g_action_from_keyboard=false;
 bool   g_shift_down=false;
 bool   g_ctrl_down=false;
 bool   g_shift_state_known=false;
@@ -153,6 +154,33 @@ bool PS_BuildFreshPlan(string &error)
                                        chart_height,error));
   }
 
+void PS_DiscardUncommittedEdit()
+  {
+   // Typed text is applied to the model as a live preview. Before a plan is
+   // saved for a symbol being left, restore the values from before the edit
+   // so a half-typed number is never stored as that symbol's plan.
+   if(g_editor.active) PS_EditorCancel(g_editor,g_model);
+  }
+
+void PS_SavePanelPosition()
+  {
+   if(g_persistence_base=="" || !g_ui.created) return;
+   GlobalVariableSet(PS_PersistenceKey(g_persistence_base,"px"),(double)g_ui.panel_x);
+   GlobalVariableSet(PS_PersistenceKey(g_persistence_base,"py"),(double)g_ui.panel_y);
+  }
+
+void PS_LoadPanelPosition()
+  {
+   // The EA is re-initialized on every timeframe change. Without this the
+   // panel would jump back to its default corner each time.
+   double x=0.0,y=0.0;
+   if(!PS_PersistenceRead(PS_PersistenceKey(g_persistence_base,"px"),x) ||
+      !PS_PersistenceRead(PS_PersistenceKey(g_persistence_base,"py"),y)) return;
+   if(x<0.0 || y<0.0 || x>100000.0 || y>100000.0) return;
+   g_ui.panel_x=(int)x;
+   g_ui.panel_y=(int)y;
+  }
+
 void PS_AbortInteractionForContextChange()
   {
    PS_EditorReset(g_editor);
@@ -202,7 +230,11 @@ void PS_RefreshMarket(const bool clear_status=false)
                         refreshed.symbol!=previous_symbol);
    if(symbol_changed)
      {
-      if(!g_symbol_transition_pending) PS_SaveState();
+      if(!g_symbol_transition_pending)
+        {
+         PS_DiscardUncommittedEdit();
+         PS_SaveState();
+        }
       PS_AbortInteractionForContextChange();
       PS_CopyMarketSnapshot(g_market,refreshed);
       g_transition_target_symbol=refreshed.symbol;
@@ -483,6 +515,22 @@ bool PS_BuildFreshTradeSnapshot(PSTradeSnapshot &snapshot,string &error)
    return(true);
   }
 
+void PS_ReportTradeFailure(const string text)
+  {
+   // The panel paints no status line, so a request that was asked for but
+   // not placed is logged and shown in a dialog instead of failing silently.
+   PS_SetStatus(text,true,9000);
+   PS_LogWarning(text);
+   MessageBox(text,PS_PRODUCT_NAME+" order not placed",MB_OK|MB_ICONWARNING);
+  }
+
+int PS_ConfirmationFlags()
+  {
+   // A key still held from a keyboard activation auto-repeats into the modal
+   // dialog. Default that dialog to No so the repeat can never approve a send.
+   return(MB_YESNO|MB_ICONQUESTION|(g_action_from_keyboard ? MB_DEFBUTTON2 : 0));
+  }
+
 void PS_DoTrade()
   {
    ulong now=GetTickCount64();
@@ -502,7 +550,7 @@ void PS_DoTrade()
    string error="";
    if(!PS_BuildFreshTradeSnapshot(confirmed,error))
      {
-      PS_SetStatus(error,true,7000);
+      PS_ReportTradeFailure(error);
       return;
      }
 
@@ -510,7 +558,7 @@ void PS_DoTrade()
      {
       int answer=MessageBox(PS_TradeConfirmationText(confirmed,g_market),
                             PS_PRODUCT_NAME+" "+PS_VERSION_TEXT+" confirmation",
-                            MB_YESNO|MB_ICONQUESTION);
+                            PS_ConfirmationFlags());
       if(answer!=IDYES)
         {
          PS_SetStatus("Trade canceled. No request was sent.",false,4000);
@@ -520,7 +568,7 @@ void PS_DoTrade()
       PSTradeSnapshot refreshed;
       if(!PS_BuildFreshTradeSnapshot(refreshed,error))
         {
-         PS_SetStatus("Trade changed or became invalid after confirmation: "+error,true,7000);
+         PS_ReportTradeFailure("Trade changed or became invalid after confirmation: "+error);
          return;
         }
       // Confirmation is intentionally one-stage. Quotes can move while the
@@ -533,10 +581,13 @@ void PS_DoTrade()
    g_last_submit_ms=GetTickCount64();
    MqlTradeResult result={};
    bool sent=PS_TradeSendSnapshot(confirmed,result,error);
+   // The send blocks. Restamp on return so input queued behind it is still
+   // inside the duplicate-submission window.
+   g_last_submit_ms=GetTickCount64();
    g_trade_in_flight=false;
 
    if(!sent)
-      PS_SetStatus(error,true,9000);
+      PS_ReportTradeFailure(error);
    else
      {
       string ids="";
@@ -585,7 +636,7 @@ void PS_DoMoveStops()
      {
       int answer=MessageBox(PS_TradeSlConfirmationText(g_model,g_market,targets),
                             PS_PRODUCT_NAME+" stop-loss confirmation",
-                            MB_YESNO|MB_ICONQUESTION);
+                            PS_ConfirmationFlags());
       if(answer!=IDYES)
         {
          PS_SetStatus("Stop-loss batch canceled. No modification request was sent.",false,4000);
@@ -614,7 +665,7 @@ void PS_DoMoveStops()
          int updated=MessageBox("The exact eligible target set changed after confirmation.\n\n"+
                                 PS_TradeSlConfirmationText(g_model,g_market,refreshed),
                                 PS_PRODUCT_NAME+" updated stop-loss confirmation",
-                                MB_YESNO|MB_ICONQUESTION);
+                                PS_ConfirmationFlags());
          if(updated!=IDYES)
            {
             PS_SetStatus("Updated stop-loss batch canceled. No modification request was sent.",false,4000);
@@ -657,6 +708,7 @@ void PS_DoMoveStops()
    int failed=0;
    string details="";
    PS_TradeExecuteSlBatch(targets,succeeded,failed,details);
+   g_last_submit_ms=GetTickCount64();
    g_trade_in_flight=false;
 
    string summary=StringFormat("Move SLs complete: %d succeeded, %d failed.",succeeded,failed);
@@ -666,6 +718,237 @@ void PS_DoMoveStops()
    if(StringLen(visible)>1500) visible=StringSubstr(visible,0,1500)+"\n… See Experts log for remaining details.";
    MessageBox(summary+"\n\n"+visible,PS_PRODUCT_NAME+" stop-loss results",MB_OK|(failed>0 ? MB_ICONWARNING : MB_ICONINFORMATION));
    PS_RefreshMarket(false);
+  }
+
+void PS_Notice(const string text)
+  {
+   // The panel paints no status line, so an outcome the user asked for is
+   // shown in a dialog.
+   PS_SetStatus(text,false,6000);
+   MessageBox(text,PS_PRODUCT_NAME,MB_OK|MB_ICONINFORMATION);
+  }
+
+void PS_DoMoveTakes()
+  {
+   ulong now=GetTickCount64();
+   if(g_trade_in_flight) return;
+   if(now-g_last_submit_ms<750) return;
+   if(!PS_CommitEditor()) return;
+   PS_RefreshMarket(false);
+   if(g_symbol_transition_pending)
+     {
+      PS_Notice("Symbol data is still changing. No take-profit modification was prepared.");
+      return;
+     }
+   if(!PS_IsPositiveFinite(g_model.take_profit))
+     {
+      PS_Notice("No take-profit line is set. Enter a TP price first.");
+      return;
+     }
+
+   PSTpTarget targets[];
+   int count=PS_TradeCollectTpTargets(g_model,g_market,targets);
+   if(count<0)
+     {
+      PS_Notice("The complete take-profit target set could not be read. No modification request was sent.");
+      return;
+     }
+   if(count==0)
+     {
+      PS_Notice("No valid current-symbol positions or pending orders need to be moved to the take-profit line.");
+      return;
+     }
+
+   if(g_model.ask_confirmation)
+     {
+      int answer=MessageBox(PS_TradeTpConfirmationText(g_model,g_market,targets),
+                            PS_PRODUCT_NAME+" take-profit confirmation",
+                            PS_ConfirmationFlags());
+      if(answer!=IDYES)
+        {
+         PS_SetStatus("Take-profit batch canceled. No modification request was sent.",false,4000);
+         return;
+        }
+      PS_RefreshMarket(false);
+      if(g_symbol_transition_pending || !g_market.symbol_ready)
+        {
+         PS_Notice("Symbol data changed during confirmation. No take-profit modification was sent.");
+         return;
+        }
+      // Unlike a new order, a changed target set is never sent unseen: the
+      // user confirmed exact tickets and prices, so any difference aborts.
+      PSTpTarget refreshed[];
+      if(PS_TradeCollectTpTargets(g_model,g_market,refreshed)<0 ||
+         !PS_TradeTpTargetSetsEqual(targets,refreshed,g_market.tick_size))
+        {
+         PS_Notice("The eligible take-profit targets changed during confirmation. No request was sent; click TP to line again.");
+         return;
+        }
+     }
+
+   g_trade_in_flight=true;
+   g_last_submit_ms=GetTickCount64();
+   int succeeded=0;
+   int failed=0;
+   string details="";
+   PS_TradeExecuteTpBatch(targets,succeeded,failed,details);
+   g_last_submit_ms=GetTickCount64();
+   g_trade_in_flight=false;
+
+   string summary=StringFormat("Move TPs complete: %d succeeded, %d failed.",succeeded,failed);
+   PS_SetStatus(summary,(failed>0),9000);
+   PS_LogInfo(summary+"\n"+details);
+   string visible=details;
+   if(StringLen(visible)>1500) visible=StringSubstr(visible,0,1500)+"\n… See Experts log for remaining details.";
+   MessageBox(summary+"\n\n"+visible,PS_PRODUCT_NAME+" take-profit results",MB_OK|(failed>0 ? MB_ICONWARNING : MB_ICONINFORMATION));
+   PS_RefreshMarket(false);
+  }
+
+bool PS_FillTextMatches(const string shown,const string wanted);
+
+int    g_fill_stage=0;
+int    g_fill_tab=0;
+ulong  g_fill_deadline_ms=0;
+ulong  g_fill_verify_ms=0;
+string g_fill_symbol="";
+string g_fill_volume="";
+string g_fill_stop="";
+string g_fill_take="";
+string g_fill_price="";
+
+void PS_FillFail(const string reason)
+  {
+   g_fill_stage=0;
+   string text=reason+"\n\nCheck every field in the MT5 order window yourself before you send anything.";
+   PS_SetStatus(reason,true,9000);
+   PS_LogWarning(reason);
+   MessageBox(text,PS_PRODUCT_NAME+" fill",MB_OK|MB_ICONWARNING);
+  }
+
+void PS_DoFill()
+  {
+   // Fill types the planned numbers into MT5's own New Order window. It
+   // never presses Buy or Sell: sending the order stays the user's click.
+   if(g_fill_stage!=0) return;
+   if(!PS_CommitEditor()) return;
+   PS_RefreshMarket(false);
+   if(g_symbol_transition_pending || !g_calc.sizing_available ||
+      !PS_IsPositiveFinite(g_calc.volume) || !PS_IsPositiveFinite(g_model.stop_loss))
+     {
+      PS_Notice("Position size is not available yet, so there is nothing to fill.");
+      return;
+     }
+
+   bool pending=(g_model.order_mode==PS_ORDER_PENDING);
+   int tab=PS_ORDER_TAB_MARKET;
+   if(pending)
+     {
+      ENUM_ORDER_TYPE type=g_calc.resolved_order_type;
+      if(type==ORDER_TYPE_BUY_LIMIT || type==ORDER_TYPE_SELL_LIMIT) tab=PS_ORDER_TAB_LIMIT;
+      else if(type==ORDER_TYPE_BUY_STOP || type==ORDER_TYPE_SELL_STOP) tab=PS_ORDER_TAB_STOP;
+      else
+        {
+         PS_Notice("The pending order type is not resolved, so there is nothing to fill.");
+         return;
+        }
+     }
+
+   g_fill_symbol=_Symbol;
+   g_fill_tab=tab;
+   g_fill_volume=PS_VolumeText(g_calc.volume,g_market);
+   g_fill_stop=PS_PriceText(PS_NormalizePrice(g_model.stop_loss,g_market),g_market);
+   // Zero clears a take-profit left in the window by an earlier fill.
+   g_fill_take=(PS_IsPositiveFinite(g_model.take_profit)
+                ? PS_PriceText(PS_NormalizePrice(g_model.take_profit,g_market),g_market) : "0");
+   g_fill_price=(pending ? PS_PriceText(g_calc.effective_entry,g_market) : "");
+
+   if(PS_PlatformFindOrderDialog(g_fill_symbol)==0)
+     {
+      string error="";
+      if(!PS_PlatformOpenNativeOrderDialog(error))
+        {
+         PS_FillFail(error);
+         return;
+        }
+     }
+   g_fill_deadline_ms=GetTickCount64()+3000;
+   g_fill_stage=1;
+  }
+
+void PS_FillTick()
+  {
+   if(g_fill_stage==0) return;
+   ulong now=GetTickCount64();
+   if(_Symbol!=g_fill_symbol || g_symbol_transition_pending)
+     {
+      g_fill_stage=0;
+      return;
+     }
+   ulong dialog=PS_PlatformFindOrderDialog(g_fill_symbol);
+   if(dialog==0)
+     {
+      if(now>g_fill_deadline_ms) PS_FillFail("The MT5 New Order window for "+g_fill_symbol+" was not found. Nothing was filled.");
+      return;
+     }
+
+   if(g_fill_stage==1)
+     {
+      if(!PS_PlatformOrderDialogSelectTab(dialog,g_fill_tab))
+        {
+         PS_FillFail("The order type tab was not found in this MT5 version. Nothing was filled.");
+         return;
+        }
+      g_fill_deadline_ms=now+2000;
+      g_fill_stage=2;
+      return;
+     }
+
+   ulong page=PS_PlatformOrderDialogPage(dialog);
+   bool pending=(g_fill_tab!=PS_ORDER_TAB_MARKET);
+   if(g_fill_stage==2)
+     {
+      // Wait for the requested tab: only pending pages show a Price box.
+      if(page==0 || PS_PlatformOrderPageHasPrice(page)!=pending)
+        {
+         if(now>g_fill_deadline_ms) PS_FillFail("The requested order type page did not appear. Nothing was filled.");
+         return;
+        }
+      bool typed=PS_PlatformTypeIntoEdit(page,PS_ORDER_EDIT_VOLUME,g_fill_volume) &&
+                 PS_PlatformTypeIntoEdit(page,PS_ORDER_EDIT_STOP,g_fill_stop) &&
+                 PS_PlatformTypeIntoEdit(page,PS_ORDER_EDIT_TAKE,g_fill_take);
+      if(typed && pending) typed=PS_PlatformTypeIntoEdit(page,PS_ORDER_EDIT_PRICE,g_fill_price);
+      if(!typed)
+        {
+         PS_FillFail("An input box was not found in this MT5 version. The window may be only partly filled.");
+         return;
+        }
+      g_fill_verify_ms=now+400;
+      g_fill_stage=3;
+      return;
+     }
+
+   if(now<g_fill_verify_ms) return;
+   bool matches=(page!=0 &&
+                 PS_FillTextMatches(PS_PlatformReadEdit(page,PS_ORDER_EDIT_VOLUME),g_fill_volume) &&
+                 PS_FillTextMatches(PS_PlatformReadEdit(page,PS_ORDER_EDIT_STOP),g_fill_stop) &&
+                 PS_FillTextMatches(PS_PlatformReadEdit(page,PS_ORDER_EDIT_TAKE),g_fill_take));
+   if(matches && pending)
+      matches=PS_FillTextMatches(PS_PlatformReadEdit(page,PS_ORDER_EDIT_PRICE),g_fill_price);
+   if(!matches)
+     {
+      PS_FillFail("The MT5 order window does not show the planned values after filling.");
+      return;
+     }
+   g_fill_stage=0;
+   PS_SetStatus("Order window filled. Review it and press Buy or Sell yourself.",false,6000);
+  }
+
+bool PS_FillTextMatches(const string shown,const string wanted)
+  {
+   if(shown=="" || wanted=="") return(false);
+   double a=StringToDouble(shown);
+   double b=StringToDouble(wanted);
+   return(PS_IsFinite(a) && PS_IsFinite(b) && MathAbs(a-b)<=1.0e-9);
   }
 
 void PS_SetViewModeState(const PSViewMode view_mode)
@@ -778,6 +1061,12 @@ void PS_Action(const PSControlId control)
          break;
       case PS_CTRL_MOVE_SLS:
          PS_DoMoveStops();
+         break;
+      case PS_CTRL_MOVE_TPS:
+         PS_DoMoveTakes();
+         break;
+      case PS_CTRL_FILL:
+         PS_DoFill();
          break;
       case PS_CTRL_TRADE:
          if(g_calc.valid) PS_DoTrade();
@@ -971,6 +1260,14 @@ void PS_MousePress(const int x,const int y)
   {
    PS_ResetShortcutContext();
    if(!g_initialized || g_symbol_transition_pending || !g_ps_panel_render_ready) return;
+   // A pointer press anywhere ends keyboard focus. Only a field being edited
+   // takes it back below, so a clicked action control can never be re-fired
+   // later by Enter or Space typed at the chart.
+   if(g_keyboard_focus!=PS_CTRL_NONE)
+     {
+      g_keyboard_focus=PS_CTRL_NONE;
+      g_panel_dirty=true;
+     }
    ulong started=GetMicrosecondCount();
    int native_x=0;
    int native_y=0;
@@ -1000,6 +1297,18 @@ void PS_MousePress(const int x,const int y)
    g_pointer.press_ms=GetTickCount64();
    g_pointer.last_repeat_ms=g_pointer.press_ms;
 
+   bool in_sidecar=(g_exposure_ui.details_open &&
+                    PS_RectContains(g_exposure_ui.sidecar_rect,x,y));
+   if(in_sidecar && PS_UIInPanel(g_ui,x,y))
+     {
+      // On a chart too small for a free lane the exposure details overlap
+      // the panel. A press in that overlap is ambiguous, so it activates
+      // nothing: a covered Long/Short, order-mode or Trade control must
+      // never fire from a click aimed at the details.
+      PS_UIGuardEnter(g_ui);
+      PS_PerfCheck("pointer",started,PS_POINTER_BUDGET_US);
+      return;
+     }
    if(PS_UIInPanel(g_ui,x,y))
      {
        PS_UIGuardEnter(g_ui);
@@ -1011,18 +1320,16 @@ void PS_MousePress(const int x,const int y)
           g_pointer.capture=PS_CAPTURE_NONE;
           g_pointer.control=PS_CTRL_NONE;
           g_pressed_control=PS_CTRL_NONE;
-          g_keyboard_focus=PS_CTRL_NONE;
-          g_panel_dirty=false;
           PS_PerfCheck("pointer",started,PS_POINTER_BUDGET_US);
           return;
          }
        g_pointer.control=control;
       g_pressed_control=control;
-      g_keyboard_focus=control;
       g_panel_dirty=true;
       PSFieldId field=PS_UIFieldForControl(control);
       if(field!=PS_FIELD_NONE && PS_UIControlIsEditable(control,g_model))
         {
+         g_keyboard_focus=control;
          if(g_editor.active && g_editor.field!=field && !PS_CommitEditor())
            {
             PS_PerfCheck("pointer",started,PS_POINTER_BUDGET_US);
@@ -1083,7 +1390,9 @@ void PS_MousePress(const int x,const int y)
 
    bool handle_hit=false;
    PSLevelId level=PS_UIHitHandle(x,y,handle_hit);
-   if(handle_hit)
+   // A press inside the open exposure details belongs to the details, never
+   // to a level handle lying under them.
+   if(handle_hit && !in_sidecar)
      {
       if(g_editor.active && !PS_CommitEditor())
         {
@@ -1296,6 +1605,21 @@ void PS_MouseRelease(const int x,const int y)
    if(panel_dragged) PS_UIEndPanelDrag(g_ui);
   }
 
+ulong g_panel_drag_frame_us=0;
+
+void PS_PanelDragFrame()
+  {
+   // The frame timer alone moves a dragged panel about sixty times a second,
+   // because Windows rounds short timers up. Mouse events arrive in between,
+   // so the panel is also moved from them. The spacing keeps MT5 from being
+   // sent more moves than it can draw, which would make it trail the cursor.
+   if(g_pointer.capture!=PS_CAPTURE_PANEL || !g_pointer.drag_started) return;
+   ulong now_us=GetMicrosecondCount();
+   if(now_us-g_panel_drag_frame_us<4000) return;
+   g_panel_drag_frame_us=now_us;
+   PS_FlushCapturedMove();
+  }
+
 void PS_HandleMouseEvent(const int x,const int y,const uint mask)
   {
    PS_ObserveMouseModifiers(mask);
@@ -1320,6 +1644,7 @@ void PS_HandleMouseEvent(const int x,const int y,const uint mask)
       if(!left) PS_MouseRelease(x,y);
       else if(PS_IsMotionCapture()) PS_QueueCapturedMove(x,y);
       else PS_MouseMoveCaptured(x,y);
+      PS_PanelDragFrame();
      }
 
    g_pointer.last_x=x;
@@ -1512,7 +1837,20 @@ void PS_HandleKeyDown(const int key,const uint flags=0)
    if(!g_editor.active && (key==13 || key==32) && g_keyboard_focus>=0 &&
       g_keyboard_focus<PS_CTRL_COUNT && g_ps_control_visible[(int)g_keyboard_focus])
      {
-      PS_Action(g_keyboard_focus);
+      // Bit 14 is the previous key state: set on every auto-repeat. A held
+      // key activates once.
+      if((flags & 0x4000)!=0) return;
+      PSControlId activated=g_keyboard_focus;
+      // One Tab focus authorizes one order-sending activation. Sending again
+      // needs a fresh Tab, never a later stray Enter or Space.
+      if(activated==PS_CTRL_TRADE || activated==PS_CTRL_MOVE_SLS)
+        {
+         g_keyboard_focus=PS_CTRL_NONE;
+         g_panel_dirty=true;
+        }
+      g_action_from_keyboard=true;
+      PS_Action(activated);
+      g_action_from_keyboard=false;
       return;
      }
    PS_ExecuteEditorKey(key,g_shift_down,g_ctrl_down);
@@ -1704,6 +2042,7 @@ int OnInit()
    g_ui.prefix=StringFormat("%s.%08X.",PS_OBJECT_NAMESPACE,instance_hash);
    g_ui.panel_x=16;
    g_ui.panel_y=28;
+   PS_LoadPanelPosition();
    PS_UIInitializeEvents(g_ui);
    if(!PS_UICreate(g_ui))
      {
@@ -1748,6 +2087,7 @@ void OnDeinit(const int reason)
       PS_EditorCommit(g_editor,g_model,g_market,ignored);
      }
    PS_SaveState();
+   PS_SavePanelPosition();
    GlobalVariablesFlush();
    PS_UIDeleteOwned(g_ui);
    PS_LogInfo(StringFormat("%s %s deinitialized (reason %d).",PS_PRODUCT_NAME,PS_VERSION_TEXT,reason));
@@ -1778,6 +2118,27 @@ void PS_CheckForUpdates(const ulong now)
    string update_error="";
    if(!PS_PlatformLaunchUpdater(update_error))
       PS_LogWarningRateLimited("updater.launch",update_error,60000);
+  }
+
+double g_tracked_price_min=0.0;
+double g_tracked_price_max=0.0;
+
+void PS_TrackPriceScale()
+  {
+   // Chart lines are price-anchored and follow a rescale at once. Markers and
+   // labels are pixel-anchored, so reposition them on the same timer frame
+   // in which the visible price range changes instead of waiting for the
+   // one-second maintenance pass.
+   // Skipped while the pointer owns a drag: the price range cannot change
+   // then, and the query would stall the drag frame.
+   if(g_pointer.capture!=PS_CAPTURE_NONE) return;
+   double price_min=ChartGetDouble(ChartID(),CHART_PRICE_MIN,0);
+   double price_max=ChartGetDouble(ChartID(),CHART_PRICE_MAX,0);
+   if(price_min==g_tracked_price_min && price_max==g_tracked_price_max) return;
+   g_tracked_price_min=price_min;
+   g_tracked_price_max=price_max;
+   g_ui.line_dirty=true;
+   g_exposure_labels_dirty=true;
   }
 
 void OnTimer()
@@ -1826,6 +2187,8 @@ void OnTimer()
    // fast motion and gives both interaction paths identical pacing.
    PS_FlushCapturedMove();
    PS_TimerStepper();
+   PS_TrackPriceScale();
+   PS_FillTick();
 
    bool motion_capture=(g_pointer.capture==PS_CAPTURE_PANEL ||
                         g_pointer.capture==PS_CAPTURE_HANDLE_ENTRY ||

@@ -88,6 +88,12 @@ For the 1.2.3 keyboard fixes described in [the 2026-10-02 audit](KEYBOARD_AUDIT_
 
 15. For the 1.2.4 event-delivery correction, exercise Ctrl+A/C/V/X/Z with brief presses in each terminal. Ctrl+A must survive a chart-layout event without a field change. Copy, paste, cut and undo must execute only once when both press and release arrive. Changing the symbol, field or explicit pointer focus must not apply an old command to the new field.
 
+16. Duplicate-order keyboard checks, on a demo account with Confirmation off and then on:
+    - Click `Trade` once with the mouse, then press Enter and Space with the chart focused. No second request may be sent. Repeat with `Move SLs to line`.
+    - Tab to `Trade`, hold Enter for three seconds. Exactly one request (Confirmation off) or one dialog that the held key answers with `No` (Confirmation on).
+    - Tab to `Trade`, press Enter once, then press Enter again without Tab. No second request.
+    - Inspect the resulting order, deal and position: the Comment column must be empty.
+
 These tests do not retroactively change older published binaries. Native acceptance must use the newly activated build, not only the version written on disk.
 
 ## 6. Manual chart interaction matrix

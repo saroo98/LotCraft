@@ -8,7 +8,6 @@
 #define PS_LOG_PREFIX                "LotCraft"
 #define PS_OBJECT_NAMESPACE          "LotCraft.v100"
 #define PS_STATE_NAMESPACE           "LotCraft.100"
-#define PS_REQUEST_COMMENT           "LotCraft 1.2.4"
 
 #define PS_DIAGNOSTICS               0
 #define PS_POINTER_BUDGET_US         2000
@@ -114,6 +113,8 @@ enum PSControlId
    PS_CTRL_POSITION_COPY,
    PS_CTRL_EXPOSURE_SUMMARY,
    PS_CTRL_MOVE_SLS,
+   PS_CTRL_MOVE_TPS,
+   PS_CTRL_FILL,
    PS_CTRL_CONFIRM,
    PS_CTRL_TRADE,
    PS_CTRL_COUNT
@@ -228,6 +229,7 @@ struct PSMarketSnapshot
    long expiration_mode;
    long order_mode;
    long calc_mode;
+   double pip_size;
    long account_login;
    long account_margin_mode;
    long account_trade_mode;
@@ -598,6 +600,7 @@ void PS_CopyMarketSnapshot(PSMarketSnapshot &destination,const PSMarketSnapshot 
    destination.expiration_mode=source.expiration_mode;
    destination.order_mode=source.order_mode;
    destination.calc_mode=source.calc_mode;
+   destination.pip_size=source.pip_size;
    destination.account_login=source.account_login;
    destination.account_margin_mode=source.account_margin_mode;
    destination.account_trade_mode=source.account_trade_mode;
@@ -655,6 +658,28 @@ void PS_CopyTradeSnapshot(PSTradeSnapshot &destination,const PSTradeSnapshot &so
    destination.commission_mode=source.commission_mode;
    destination.commission_per_lot=source.commission_per_lot;
    PS_CopyTradeRequest(destination.request,source.request);
+  }
+
+struct PSTpTarget
+  {
+   bool is_position;
+   ulong ticket;
+   string symbol;
+   PSDirection direction;
+   double entry;
+   double old_tp;
+   double target_tp;
+  };
+
+void PS_CopyTpTarget(PSTpTarget &destination,const PSTpTarget &source)
+  {
+   destination.is_position=source.is_position;
+   destination.ticket=source.ticket;
+   destination.symbol=source.symbol;
+   destination.direction=source.direction;
+   destination.entry=source.entry;
+   destination.old_tp=source.old_tp;
+   destination.target_tp=source.target_tp;
   }
 
 void PS_CopySlTarget(PSSlTarget &destination,const PSSlTarget &source)
@@ -842,7 +867,31 @@ string PS_CalcIssueText(const PSCalcIssue issue)
 string PS_PercentText(const double value)
   {
    if(!PS_IsFinite(value)) return("—");
-   return(DoubleToString(value,2));
+   // The editor accepts four decimals. Show them, keeping at least two, so
+   // the displayed risk is the risk used for sizing.
+   string text=DoubleToString(value,4);
+   for(int trimmed=0;trimmed<2 && StringGetCharacter(text,StringLen(text)-1)=='0';trimmed++)
+      text=StringSubstr(text,0,StringLen(text)-1);
+   return(text);
+  }
+
+double PS_PipSize(const PSMarketSnapshot &market)
+  {
+   // The market layer classifies the instrument. This fallback covers a
+   // snapshot without a classification: fractional quotes (5 and 3 digits)
+   // use ten points per pip, whole-pip quotes use one.
+   if(PS_IsPositiveFinite(market.pip_size)) return(market.pip_size);
+   if(!PS_IsPositiveFinite(market.point)) return(0.0);
+   return((market.digits==3 || market.digits==5) ? market.point*10.0 : market.point);
+  }
+
+string PS_PipsText(const double distance,const PSMarketSnapshot &market)
+  {
+   double pip=PS_PipSize(market);
+   if(pip<=0.0 || !PS_IsFinite(distance)) return("");
+   double pips=MathAbs(distance)/pip;
+   if(!PS_IsFinite(pips)) return("");
+   return((pips>=10.0 ? DoubleToString(MathRound(pips),0) : DoubleToString(pips,1))+" pips");
   }
 
 string PS_VolumeText(const double value,const PSMarketSnapshot &market)

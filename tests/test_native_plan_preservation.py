@@ -143,6 +143,7 @@ ulong GetTickCount64(){return 1000;}
 void PS_MarketAcquire(PSMarketSnapshot& m){m=next_market;}
 void PS_CopyMarketSnapshot(PSMarketSnapshot& a,const PSMarketSnapshot& b){a=b;}
 void PS_AbortInteractionForContextChange(){}
+void PS_DiscardUncommittedEdit(){}
 void PS_SetStatus(const string&,bool,int){}
 void PS_UIHidePanelContent(int){}
 void PS_UIHidePlanningLines(int){}

@@ -24,6 +24,11 @@ short GetAsyncKeyState(int vKey);
 uint  MapVirtualKeyW(uint uCode,uint uMapType);
 uint  GetDoubleClickTime();
 int   GetSystemMetrics(int nIndex);
+ulong FindWindowExW(ulong hWndParent,ulong hWndChildAfter,string class_name,long window_name);
+ulong GetDlgItem(ulong hDlg,int nIDDlgItem);
+int   IsWindowVisible(ulong hWnd);
+uint  GetWindowThreadProcessId(ulong hWnd,uint &process_id);
+int   GetWindowTextW(ulong hWnd,ushort &text[],int max_count);
 #import
 
 #import "kernel32.dll"
@@ -37,6 +42,7 @@ uint  GlobalFree(uint hMem);
 ulong GlobalFree(ulong hMem);
 uint  GlobalSize(uint hMem);
 ulong GlobalSize(ulong hMem);
+uint  GetCurrentProcessId();
 void  RtlMoveMemory(ushort &destination[],uint source,uint bytes);
 void  RtlMoveMemory(ushort &destination[],ulong source,ulong bytes);
 uint  lstrcpyW(uint destination,string source);
@@ -54,6 +60,8 @@ ulong ShellExecuteW(ulong hWnd,string operation,string file,string parameters,st
 #define PS_WM_KEYUP       0x0101
 #define PS_VK_F9          0x78
 #define PS_VK_LBUTTON     0x01
+#define PS_VK_RBUTTON     0x02
+#define PS_SM_SWAPBUTTON  23
 #define PS_SM_CXDOUBLECLK 36
 #define PS_SM_CYDOUBLECLK 37
 #define PS_SW_HIDE        0
@@ -313,14 +321,128 @@ bool PS_PlatformOpenNativeOrderDialog(string &error)
    return(true);
   }
 
+// Control identifiers of MT5's own New Order window, read from a live
+// terminal. Only page tabs and numeric input boxes are listed. The window's
+// Buy and Sell buttons are deliberately absent: LotCraft fills numbers in,
+// and placing the order always remains the user's own click.
+#define PS_ORDER_DIALOG_CLASS     "#32770"
+#define PS_ORDER_TAB_MARKET       11116
+#define PS_ORDER_TAB_LIMIT        11117
+#define PS_ORDER_TAB_STOP         11118
+#define PS_ORDER_SYMBOL_COMBO     10331
+#define PS_ORDER_EDIT_VOLUME      10333
+#define PS_ORDER_EDIT_STOP        10334
+#define PS_ORDER_EDIT_TAKE        10336
+#define PS_ORDER_EDIT_PRICE       10424
+#define PS_WM_CHAR                0x0102
+#define PS_EM_SETSEL              0x00B1
+#define PS_BM_CLICK               0x00F5
+
+string PS_PlatformWindowText(const ulong window)
+  {
+   if(window==0) return("");
+   ushort buffer[];
+   if(ArrayResize(buffer,256)!=256) return("");
+   ArrayInitialize(buffer,0);
+   int length=GetWindowTextW(window,buffer,255);
+   if(length<=0 || length>255) return("");
+   return(ShortArrayToString(buffer,0,length));
+  }
+
+ulong PS_PlatformFindOrderDialog(const string symbol)
+  {
+   // The New Order window is a top-level dialog of this terminal process
+   // whose symbol box starts with the chart symbol. Its title is localized,
+   // so it is recognized by structure, never by caption.
+   if(!_IsX64 || !MQLInfoInteger(MQL_DLLS_ALLOWED) || symbol=="") return(0);
+   uint own_process=GetCurrentProcessId();
+   ulong window=0;
+   for(int guard=0;guard<500;guard++)
+     {
+      window=FindWindowExW(0,window,PS_ORDER_DIALOG_CLASS,0);
+      if(window==0) return(0);
+      uint process=0;
+      GetWindowThreadProcessId(window,process);
+      if(process!=own_process || IsWindowVisible(window)==0) continue;
+      if(GetDlgItem(window,PS_ORDER_TAB_MARKET)==0) continue;
+      string shown=PS_PlatformWindowText(GetDlgItem(window,PS_ORDER_SYMBOL_COMBO));
+      if(StringFind(shown,symbol+",")==0) return(window);
+     }
+   return(0);
+  }
+
+ulong PS_PlatformOrderDialogPage(const ulong dialog)
+  {
+   // Each tab is a child dialog. Only the visible one holds live inputs.
+   if(dialog==0) return(0);
+   ulong page=0;
+   for(int guard=0;guard<32;guard++)
+     {
+      page=FindWindowExW(dialog,page,PS_ORDER_DIALOG_CLASS,0);
+      if(page==0) return(0);
+      if(IsWindowVisible(page)!=0 && GetDlgItem(page,PS_ORDER_EDIT_VOLUME)!=0) return(page);
+     }
+   return(0);
+  }
+
+bool PS_PlatformOrderDialogSelectTab(const ulong dialog,const int tab_id)
+  {
+   if(tab_id!=PS_ORDER_TAB_MARKET && tab_id!=PS_ORDER_TAB_LIMIT && tab_id!=PS_ORDER_TAB_STOP) return(false);
+   ulong tab=GetDlgItem(dialog,tab_id);
+   if(tab==0) return(false);
+   return(PostMessageW(tab,PS_BM_CLICK,(ulong)0,(long)0)!=0);
+  }
+
+bool PS_PlatformTypeIntoEdit(const ulong page,const int edit_id,const string text)
+  {
+   // MT5 ignores text assigned to these boxes and only registers typed
+   // characters. Select the old content and type the new value over it.
+   if(edit_id!=PS_ORDER_EDIT_VOLUME && edit_id!=PS_ORDER_EDIT_STOP &&
+      edit_id!=PS_ORDER_EDIT_TAKE && edit_id!=PS_ORDER_EDIT_PRICE) return(false);
+   ulong edit=GetDlgItem(page,edit_id);
+   int length=StringLen(text);
+   if(edit==0 || IsWindowVisible(edit)==0 || length<=0 || length>24) return(false);
+   for(int i=0;i<length;i++)
+     {
+      ushort ch=StringGetCharacter(text,i);
+      if(!((ch>='0' && ch<='9') || ch=='.')) return(false);
+     }
+   if(PostMessageW(edit,PS_EM_SETSEL,(ulong)0,(long)-1)==0) return(false);
+   for(int i=0;i<length;i++)
+      if(PostMessageW(edit,PS_WM_CHAR,(ulong)StringGetCharacter(text,i),(long)1)==0) return(false);
+   return(true);
+  }
+
+bool PS_PlatformOrderPageHasPrice(const ulong page)
+  {
+   ulong price=GetDlgItem(page,PS_ORDER_EDIT_PRICE);
+   return(price!=0 && IsWindowVisible(price)!=0);
+  }
+
+string PS_PlatformReadEdit(const ulong page,const int edit_id)
+  {
+   return(PS_PlatformWindowText(GetDlgItem(page,edit_id)));
+  }
+
 bool PS_PlatformPointerPosition(int &x,int &y)
   {
    x=0;
    y=0;
    if(!MQLInfoInteger(MQL_DLLS_ALLOWED)) return(false);
 
-   long raw_handle=0;
-   if(!ChartGetInteger(ChartID(),CHART_WINDOW_HANDLE,0,raw_handle)) return(false);
+   // Called every pointer frame. The chart window handle does not change
+   // while the EA is attached, so it is read once instead of per frame.
+   static long cached_chart=0;
+   static long cached_handle=0;
+   long chart=ChartID();
+   if(chart!=cached_chart || cached_handle==0)
+     {
+      long fresh=0;
+      if(!ChartGetInteger(chart,CHART_WINDOW_HANDLE,0,fresh) || fresh==0) return(false);
+      cached_chart=chart;
+      cached_handle=fresh;
+     }
+   long raw_handle=cached_handle;
 
    int point[2];
    point[0]=0;
@@ -328,7 +450,11 @@ bool PS_PlatformPointerPosition(int &x,int &y)
    if(GetCursorPos(point)==0) return(false);
    int converted=(_IsX64 ? ScreenToClient((ulong)raw_handle,point)
                          : ScreenToClient((uint)raw_handle,point));
-   if(converted==0) return(false);
+   if(converted==0)
+     {
+      cached_handle=0;
+      return(false);
+     }
    x=point[0];
    y=point[1];
    return(true);
@@ -337,7 +463,11 @@ bool PS_PlatformPointerPosition(int &x,int &y)
 bool PS_PlatformLeftButtonDown()
   {
    if(!MQLInfoInteger(MQL_DLLS_ALLOWED)) return(true);
-   short state=GetAsyncKeyState(PS_VK_LBUTTON);
+   // GetAsyncKeyState reports physical buttons, while chart mouse events
+   // report the logical primary button. With swapped buttons the primary
+   // button is the physical right one.
+   int primary=(GetSystemMetrics(PS_SM_SWAPBUTTON)!=0 ? PS_VK_RBUTTON : PS_VK_LBUTTON);
+   short state=GetAsyncKeyState(primary);
    return((state & 0x8000)!=0);
   }
 

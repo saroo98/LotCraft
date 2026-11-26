@@ -2,7 +2,7 @@
 #define __LOTCRAFT_PS_TYPES_MQH__
 
 #define PS_PRODUCT_NAME              "LotCraft"
-#define PS_VERSION_TEXT              "1.2.4"
+#define PS_VERSION_TEXT              "2.0.0"
 #define PS_SOURCE_NAME               "LotCraft.mq5"
 #define PS_BINARY_NAME               "LotCraft.ex5"
 #define PS_LOG_PREFIX                "LotCraft"

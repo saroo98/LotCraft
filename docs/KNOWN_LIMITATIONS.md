@@ -1,4 +1,4 @@
-# LotCraft 1.2.4 known limitations
+# LotCraft 2.0.0 known limitations
 
 Current release status and evidence are in [the 1.2.4 report](RELEASE_1.2.4.md). The [1.2.3 report](RELEASE_1.2.3.md), [keyboard audit](KEYBOARD_AUDIT_2026-10-02.md), [copy audit](COPY_AUDIT_2026-10-01.md), [September 30 audit](AUDIT_2026-09-30.md) and [earlier verification report](AUDIT_VERIFICATION_2026-09-09.md) record earlier snapshots. Screenshots, installations and completion reports do not prove native behavior in MT5.
 

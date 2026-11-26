@@ -1,4 +1,4 @@
-# LotCraft 1.2.4 Test Plan
+# LotCraft 2.0.0 Test Plan
 
 ## 1. Test policy
 

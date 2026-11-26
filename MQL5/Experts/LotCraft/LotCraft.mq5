@@ -1,8 +1,8 @@
 #property strict
 #property copyright "LotCraft"
 #property link      ""
-#property version   "1.24"
-#property description "LotCraft 1.2.4"
+#property version   "2.00"
+#property description "LotCraft 2.0.0"
 #property description "Discretionary position sizing and explicit MT5 order entry assistant."
 
 #include "PS_Platform.mqh"
@@ -1987,7 +1987,7 @@ int OnInit()
   {
    if(!MQLInfoInteger(MQL_DLLS_ALLOWED))
      {
-      string message="LotCraft 1.2.4 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
+      string message="LotCraft 2.0.0 requires 'Allow DLL imports' for the required clipboard, native New Order dialog, and pointer-release safety integration. Enable the option and attach the EA again.";
       PS_LogError(message);
       MessageBox(message,PS_PRODUCT_NAME+" initialization",MB_OK|MB_ICONERROR);
       return(INIT_FAILED);

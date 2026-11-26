@@ -34,6 +34,14 @@ Behaviour and performance:
 - Panel drag makes no blocking chart query per frame and also moves on mouse events between timer ticks.
 - Panel position survives re-initialization. An uncommitted edit is discarded before a symbol's plan is saved. Risk % shows up to four decimals.
 
+## Update-signing key replaced
+
+The private key that signed 1.2.0 to 1.2.4 could not be recovered. 2.0.0 pins and is signed with a new Ed25519 key.
+
+- The updater inside every 1.2.x installation trusts only the old key. It rejects the 2.0.0 metadata and leaves the installation unchanged. That is the signature check working as designed.
+- Upgrading from 1.2.x therefore needs one manual run of the 2.0.0 installer. From 2.0.0 onward, automatic updates use the new key.
+- No release signed with the old key will follow. An update offer that claims otherwise should be treated as untrusted.
+
 ## Verified
 
 | Check | Result |

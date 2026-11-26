@@ -45,6 +45,8 @@ Chart/account exposure uses current **equity**, even when new-trade sizing uses 
 - **Smoother panel.** Dragging no longer waits on the chart each frame, markers follow a price-scale change at once, marker letters are optically centred, and the panel keeps its position across timeframe changes.
 - **Fixes.** Swapped mouse buttons, a panel deleted by another program, clicks where the exposure details overlap the panel, a half-typed value saved on symbol change, and Risk % precision.
 
+**Updating from 1.2.x needs one manual install.** The update-signing key was replaced in 2.0.0, so the updater inside 1.2.x cannot accept this release and will stay on its current version. Download and run the 2.0.0 installer once; automatic updates work again from 2.0.0 onward.
+
 The [2.0.0 release report](docs/RELEASE_2.0.0.md) records what was verified and what was not. Earlier reports: [1.2.4](docs/RELEASE_1.2.4.md), [1.2.3](docs/RELEASE_1.2.3.md), [1.2.2](docs/RELEASE_1.2.2.md), [1.2.1](docs/RELEASE_1.2.1.md). Offline verification is not native UI or broker certification. Start on a demo account.
 
 ## Install LotCraft

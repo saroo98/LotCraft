@@ -22,7 +22,7 @@ LotCraft is a discretionary trading tool, not a trading strategy. It does not ge
 | Saved planning levels | Remembers each symbol's plan on the same chart. Mode changes do not move the SL or TP. |
 | Chart controls | Provides draggable Entry, SL and TP handles, price steppers, copy feedback and a line-visibility toggle. |
 | Adaptive panel | Offers Full, Compact and Mini layouts with light and dark themes and DPI-scaled geometry. |
-| Confirmation and SL batches | Offers one risk-only confirmation for new orders and a separate validated action to move eligible current-symbol SLs to the line. |
+| Confirmation and SL batches | Offers one risk-only confirmation for new orders and separate validated actions to move eligible current-symbol SLs or TPs to the line. |
 
 The calculator uses broker profit conversion for account-currency values. It can work with available forex, index, metal and other broker symbols when their data and order rules pass validation. Symbol names, contract specifications and available order types vary by broker.
 
@@ -35,24 +35,27 @@ If the budget is below the broker's minimum lot size, LotCraft can use the minim
 
 Chart/account exposure uses current **equity**, even when new-trade sizing uses Balance or Manual. It sums downside only; profitable stops do not cancel other positions' losses. Projections include known accrued swap for positions, but cannot guarantee fills or predict gaps, slippage, future swap or unknown closing fees. A missing SL is not zero risk.
 
-## What's new in 1.2.4
+## What's new in 2.0.0
 
-- Handle **Ctrl+A/C/V/X/Z** when MT5 delivers a shortcut release without its letter press. Keep the gesture when Ctrl is released first, and prevent duplicate paste, cut or undo.
-- Preserve **Ctrl+A** through chart-layout events. Actual symbol, field-focus and lifecycle changes still clear pending commands.
-- Use delivered Ctrl/Shift events instead of replacing their state with a later observation. Keep independent left/right modifier state and defer editor painting to the existing frame timer.
-- Retain validated numeric paste, session undo/redo, C buttons, layouts, trading rules and the existing update schedule. No diagnostic logging probe is included.
+- **Safer order entry.** Enter or Space can no longer re-send a clicked Trade or SL batch, a held key acts once, and a slow send stays inside the duplicate-submit guard. A requested order that is not placed is logged and shown in a dialog.
+- **No order comment.** Requests carry no comment or product label. The magic number stays 0.
+- **SL to line / TP to line.** The line action is split in two: move the current symbol's stop-losses, or its take-profits, to the planning line. Each batch lists every ticket before it is sent.
+- **Fill order window.** Types the planned volume, SL, TP and pending price into MT5's own New Order window. It never presses Buy or Sell; sending stays your own click.
+- **Pips and profit at a glance.** Pips beside the S and T markers and inside the SL and TP fields; the TP field also shows broker-calculated profit. Pip size follows the instrument class.
+- **Smoother panel.** Dragging no longer waits on the chart each frame, markers follow a price-scale change at once, marker letters are optically centred, and the panel keeps its position across timeframe changes.
+- **Fixes.** Swapped mouse buttons, a panel deleted by another program, clicks where the exposure details overlap the panel, a half-typed value saved on symbol change, and Risk % precision.
 
-The [native keyboard investigation](docs/KEYBOARD_RELEASE_EVENT_FIX_2026-10-03.md) records the captured delivery and reset causes. The [1.2.4 release report](docs/RELEASE_1.2.4.md) separates build and publication evidence from native acceptance. The [1.2.3 report](docs/RELEASE_1.2.3.md), [1.2.2 report](docs/RELEASE_1.2.2.md) and [1.2.1 report](docs/RELEASE_1.2.1.md) retain earlier snapshots. The owner reports copy, paste, cut and undo working in the local correction; the final Ctrl+A correction still needs an explicit native acceptance result. Offline verification is not native UI or broker certification.
+The [2.0.0 release report](docs/RELEASE_2.0.0.md) records what was verified and what was not. Earlier reports: [1.2.4](docs/RELEASE_1.2.4.md), [1.2.3](docs/RELEASE_1.2.3.md), [1.2.2](docs/RELEASE_1.2.2.md), [1.2.1](docs/RELEASE_1.2.1.md). Offline verification is not native UI or broker certification. Start on a demo account.
 
 ## Install LotCraft
 
 Requirements: **Windows x64, MetaTrader 5, and permission to enable DLL imports for LotCraft**.
 
 1. Open the [latest stable GitHub release](https://github.com/saroo98/LotCraft/releases/latest).
-2. Download `LotCraft-1.2.4-Setup.exe` and its `LotCraft-1.2.4-SHA256.txt` checksum.
+2. Download `LotCraft-2.0.0-Setup.exe` and its `LotCraft-2.0.0-SHA256.txt` checksum.
 3. Compare the installer SHA-256 with the published checksum:
    ```powershell
-   Get-FileHash .\LotCraft-1.2.4-Setup.exe -Algorithm SHA256
+   Get-FileHash .\LotCraft-2.0.0-Setup.exe -Algorithm SHA256
    ```
 4. Run the installer and confirm the intended MT5 terminal data directory. No separate EX5 download or manual folder copying is needed.
 5. In MT5, refresh **Navigator → Expert Advisors**, then attach **LotCraft → LotCraft** to a chart.

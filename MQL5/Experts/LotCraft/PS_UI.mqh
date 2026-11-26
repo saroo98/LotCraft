@@ -352,6 +352,7 @@ void PS_UILayout(PSUIState &ui,const PSViewMode view_mode)
       // Keep the line-state control below the TP minus/plus/copy cluster.
       // The shared width and right edge make this a separate, aligned control.
       PS_UISetRect(g_ps_control_rects[PS_CTRL_LINES],cluster_x,y+PS_U(189),cluster_w,PS_U(22));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_FILL],x+PS_U(75),y+PS_U(189),field_w,PS_U(22));
 
       PS_UISetRect(g_ps_control_rects[PS_CTRL_ACCOUNT_MODE],x+PS_U(75),y+PS_U(231),PS_U(101),PS_U(26));
       PS_UISetRect(g_ps_control_rects[PS_CTRL_ACCOUNT_FIELD],x+PS_U(182),y+PS_U(231),PS_U(173),PS_U(26));
@@ -368,7 +369,10 @@ void PS_UILayout(PSUIState &ui,const PSViewMode view_mode)
       const int action_gap=PS_U(6);
       const int action_w=(content_w-action_gap)/2;
       PS_UISetRect(g_ps_control_rects[PS_CTRL_CONFIRM],content_x,y+PS_U(414),action_w,PS_U(32));
-      PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_SLS],content_x+action_w+action_gap,y+PS_U(414),action_w,PS_U(32));
+      const int line_action_w=(action_w-action_gap)/2;
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_SLS],content_x+action_w+action_gap,y+PS_U(414),line_action_w,PS_U(32));
+      PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_TPS],content_x+action_w+2*action_gap+line_action_w,y+PS_U(414),
+                   action_w-line_action_w-action_gap,PS_U(32));
       PS_UISetRect(g_ps_control_rects[PS_CTRL_TRADE],content_x,y+PS_U(452),content_w,PS_U(34));
 
       for(int i=0;i<PS_CTRL_COUNT;i++)
@@ -405,6 +409,7 @@ void PS_UILayout(PSUIState &ui,const PSViewMode view_mode)
 
    // Keep this control right-aligned with the TP minus/plus/copy cluster.
    PS_UISetRect(g_ps_control_rects[PS_CTRL_LINES],x+PS_U(290),y+PS_U(213),PS_U(126),PS_U(22));
+   PS_UISetRect(g_ps_control_rects[PS_CTRL_FILL],x+PS_U(92),y+PS_U(213),PS_U(192),PS_U(22));
    // Preserve the Account row geometry. Only the section top moves to create
    // the requested gap below the price-level section.
    PS_UISetRect(g_ps_control_rects[PS_CTRL_ACCOUNT_MODE],x+PS_U(92),y+PS_U(255),PS_U(121),PS_U(28));
@@ -421,7 +426,10 @@ void PS_UILayout(PSUIState &ui,const PSViewMode view_mode)
    const int action_gap=PS_U(6);
    const int action_w=(content_w-action_gap)/2;
    PS_UISetRect(g_ps_control_rects[PS_CTRL_CONFIRM],content_x,y+PS_U(455),action_w,PS_U(36));
-   PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_SLS],content_x+action_w+action_gap,y+PS_U(455),action_w,PS_U(36));
+   const int line_action_w=(action_w-action_gap)/2;
+   PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_SLS],content_x+action_w+action_gap,y+PS_U(455),line_action_w,PS_U(36));
+   PS_UISetRect(g_ps_control_rects[PS_CTRL_MOVE_TPS],content_x+action_w+2*action_gap+line_action_w,y+PS_U(455),
+                action_w-line_action_w-action_gap,PS_U(36));
    PS_UISetRect(g_ps_control_rects[PS_CTRL_TRADE],content_x,y+PS_U(499),content_w,PS_U(40));
 
    for(int i=0;i<PS_CTRL_COUNT;i++)
@@ -521,6 +529,31 @@ void PS_UIHandleCanvasesDestroy()
    for(int i=0;i<3;i++) PS_UIHandleCanvasDestroy(i);
   }
 
+void PS_UIHandleGlyphOffset(const int index,const string text,const int width,const int height,
+                            int &dx,int &dy)
+  {
+   // Font metrics centre the character cell, not the visible letter. Draw the
+   // letter once, measure its inked pixels, and return the shift that puts
+   // the ink itself in the middle of the marker.
+   dx=0;
+   dy=0;
+   g_ps_handle_canvas[index].Erase(0);
+   g_ps_handle_canvas[index].TextOut(width/2,height/2,text,0xFFFFFFFF,TA_CENTER|TA_VCENTER);
+   int left=width,right=-1,top=height,bottom=-1;
+   for(int y=0;y<height;y++)
+      for(int x=0;x<width;x++)
+        {
+         if((g_ps_handle_canvas[index].PixelGet(x,y) & 0xFF)<0x60) continue;
+         if(x<left) left=x;
+         if(x>right) right=x;
+         if(y<top) top=y;
+         if(y>bottom) bottom=y;
+        }
+   if(right<left || bottom<top) return;
+   dx=PS_ClampInt((int)MathRound(((width-1)-(left+right))/2.0),-6,6);
+   dy=PS_ClampInt((int)MathRound(((height-1)-(top+bottom))/2.0),-6,6);
+  }
+
 bool PS_UIEnsureHandleCanvas(const PSUIState &ui,const PSLevelId level,
                              const string text,const color background)
   {
@@ -566,10 +599,14 @@ bool PS_UIEnsureHandleCanvas(const PSUIState &ui,const PSLevelId level,
       repaint=true;
    if(repaint)
      {
+      g_ps_handle_canvas[index].FontSet("Segoe UI Semibold",-10*PS_Font(10));
+      int glyph_dx=0;
+      int glyph_dy=0;
+      PS_UIHandleGlyphOffset(index,text,width,height,glyph_dx,glyph_dy);
       g_ps_handle_canvas[index].Erase(COLOR2RGB(PS_UIAccessibleAccent(background)));
       g_ps_handle_canvas[index].Rectangle(0,0,width-1,height-1,COLOR2RGB(C'10,12,16'));
-      g_ps_handle_canvas[index].FontSet("Segoe UI Semibold",-10*PS_Font(10));
-      g_ps_handle_canvas[index].TextOut(width/2,height/2,text,COLOR2RGB(PS_ThemeOnAccent()),TA_CENTER|TA_VCENTER);
+      g_ps_handle_canvas[index].TextOut(width/2+glyph_dx,height/2+glyph_dy,text,
+                                        COLOR2RGB(PS_ThemeOnAccent()),TA_CENTER|TA_VCENTER);
       g_ps_handle_canvas[index].Update(false);
       g_ps_handle_canvas_color[index]=background;
       g_ps_handle_canvas_text[index]=text;
@@ -726,6 +763,38 @@ void PS_UIUpdateLines(PSUIState &ui,const PSModel &model,const PSMarketSnapshot 
    ui.line_dirty=false;
   }
 
+void PS_UIUpdateStopPips(const PSUIState &ui,const PSModel &model,const PSMarketSnapshot &market)
+  {
+   // Distance from Entry in pips, attached to the movable S and T markers on
+   // the side facing away from Entry: for a long plan below S and above T,
+   // for a short plan above S and below T. They are plain labels outside the
+   // markers' hit regions, so they never change what a press grabs.
+   double entry=(model.order_mode==PS_ORDER_INSTANT && market.tick_valid)
+                ? PS_NormalizePrice(model.direction==PS_DIRECTION_LONG ? market.tick.ask : market.tick.bid,market)
+                : model.entry;
+   bool long_plan=(model.direction==PS_DIRECTION_LONG);
+   for(int pass=0;pass<2;pass++)
+     {
+      bool stop=(pass==0);
+      int index=(int)(stop ? PS_LEVEL_STOP : PS_LEVEL_TAKE);
+      double level=(stop ? model.stop_loss : model.take_profit);
+      string suffix=(stop ? "handle.stop.pips" : "handle.take.pips");
+      string text=((PS_IsPositiveFinite(entry) && PS_IsPositiveFinite(level))
+                   ? PS_PipsText(entry-level,market) : "");
+      if(!g_ps_handle_visible[index] || text=="")
+        {
+         if(ObjectFind(ChartID(),PS_UIName(ui,suffix))>=0) PS_UIShow(ui,suffix,false);
+         continue;
+        }
+      PSRect rect=g_ps_handle_rects[index];
+      bool below=(stop ? long_plan : !long_plan);
+      int x=rect.x+rect.w/2;
+      int y=(below ? rect.y+rect.h+PS_U(2) : rect.y-PS_U(2));
+      PS_UILabel(ui,suffix,x,y,text,8,(stop ? PS_CLR_SHORT : PS_CLR_LONG),true,20010,"Segoe UI Semibold");
+      ObjectSetInteger(ChartID(),PS_UIName(ui,suffix),OBJPROP_ANCHOR,(below ? ANCHOR_UPPER : ANCHOR_LOWER));
+     }
+  }
+
 PSLevelId PS_UIHitHandle(const int x,const int y,bool &hit)
   {
    hit=false;
@@ -752,6 +821,8 @@ void PS_UIHidePlanningLines(PSUIState &ui)
    PS_UISetHandle(ui,PS_LEVEL_TAKE,0,0,"T",PS_CLR_LONG,false);
    PS_UISetHandle(ui,PS_LEVEL_ENTRY,0,0,"E",PS_CLR_ACCENT,false);
    PS_UISetHandle(ui,PS_LEVEL_STOP,0,0,"S",PS_CLR_SHORT,false);
+   if(ObjectFind(ChartID(),PS_UIName(ui,"handle.stop.pips"))>=0) PS_UIShow(ui,"handle.stop.pips",false);
+   if(ObjectFind(ChartID(),PS_UIName(ui,"handle.take.pips"))>=0) PS_UIShow(ui,"handle.take.pips",false);
    ui.line_dirty=false;
    ChartRedraw(ChartID());
   }
@@ -778,6 +849,9 @@ bool PS_UIPanelCanvasEnsure(const PSUIState &ui)
   {
    string name=PS_UIName(ui,"ui.premium.canvas");
    if(g_ps_panel_canvas_created && g_ps_panel_canvas_name!=name) PS_UIPanelCanvasDestroy();
+   // Another program can delete chart objects. A panel that no longer exists
+   // is recreated here; it must never stay invisible with live hit regions.
+   if(g_ps_panel_canvas_created && ObjectFind(ChartID(),name)<0) PS_UIPanelCanvasDestroy();
    if(!g_ps_panel_canvas_created)
      {
       if(!g_ps_panel_canvas.CreateBitmapLabel(ChartID(),0,name,ui.panel_x,ui.panel_y,
@@ -1715,6 +1789,71 @@ void PS_PremiumCompactField(const PSUIState &ui,const PSControlId control,const 
      }
   }
 
+string PS_UIStopPipsText(const PSModel &model,const PSCalcResult &calc,const PSMarketSnapshot &market)
+  {
+   double entry=(calc.effective_entry>0.0 ? calc.effective_entry : model.entry);
+   if(!PS_IsPositiveFinite(entry) || !PS_IsPositiveFinite(model.stop_loss)) return("");
+   string pips=PS_PipsText(entry-model.stop_loss,market);
+   return(pips=="" ? "" : "("+pips+")");
+  }
+
+void PS_PremiumFieldSuffix(const PSUIState &ui,const PSControlId control,const string shown,
+                           const string suffix,const int font_size,const int padding,
+                           const string accent="",const color accent_color=clrNONE)
+  {
+   // Right-aligned note inside a field. It sits at the far end of the field
+   // so it stays in one place whatever the price length. An optional accent
+   // (a money amount) is drawn outermost in its own colour, with the muted
+   // note to its left. Whatever would touch the value is left out, the
+   // muted note first.
+   if(suffix=="" && accent=="") return;
+   PSRect rect;
+   PS_PremiumControlRect(ui,control,rect);
+   int scaled_padding=PS_U(padding);
+   int gap=PS_U(8);
+   g_ps_panel_canvas.FontSet("Segoe UI Semibold",-10*PS_Font(font_size));
+   int room=rect.w-2*scaled_padding-g_ps_panel_canvas.TextWidth(shown)-gap;
+   int right=rect.x+rect.w-scaled_padding;
+   int middle=rect.y+rect.h/2;
+   if(accent!="")
+     {
+      g_ps_panel_canvas.FontSet("Segoe UI Semibold",-10*PS_Font(8));
+      int accent_w=g_ps_panel_canvas.TextWidth(accent);
+      if(accent_w<=room)
+        {
+         PS_PremiumText(right,middle,accent,8,accent_color,TA_RIGHT|TA_VCENTER,"Segoe UI Semibold");
+         right-=accent_w+PS_U(6);
+         room-=accent_w+PS_U(6);
+        }
+     }
+   if(suffix=="") return;
+   g_ps_panel_canvas.FontSet("Segoe UI",-10*PS_Font(8));
+   if(g_ps_panel_canvas.TextWidth(suffix)>room) return;
+   PS_PremiumText(right,middle,suffix,8,PS_ThemeMuted(),TA_RIGHT|TA_VCENTER);
+  }
+
+string PS_UITakePipsText(const PSModel &model,const PSCalcResult &calc,const PSMarketSnapshot &market)
+  {
+   double entry=(calc.effective_entry>0.0 ? calc.effective_entry : model.entry);
+   if(!PS_IsPositiveFinite(entry) || !PS_IsPositiveFinite(model.take_profit)) return("");
+   string pips=PS_PipsText(entry-model.take_profit,market);
+   return(pips=="" ? "" : "("+pips+")");
+  }
+
+string PS_UITakeMoneyText(const PSModel &model,const PSCalcResult &calc,const PSMarketSnapshot &market)
+  {
+   // Profit at the take-profit for the planned size, in account currency,
+   // from the broker's own calculation. Shown only when it is a real gain.
+   if(!calc.sizing_available || !PS_IsPositiveFinite(calc.volume) ||
+      !PS_IsPositiveFinite(calc.effective_entry) || !PS_IsPositiveFinite(model.take_profit)) return("");
+   double profit=0.0;
+   ENUM_ORDER_TYPE type=(model.direction==PS_DIRECTION_LONG ? ORDER_TYPE_BUY : ORDER_TYPE_SELL);
+   ResetLastError();
+   if(!OrderCalcProfit(type,market.symbol,calc.volume,calc.effective_entry,model.take_profit,profit)) return("");
+   if(!PS_IsFinite(profit) || profit<=0.0) return("");
+   return("+"+DoubleToString(profit,(profit>=100.0 ? 0 : 2))+" "+market.account_currency);
+  }
+
 void PS_PremiumCompactSmallControl(const PSUIState &ui,const PSControlId control,
                                    const string text,const bool copied=false,
                                    const int font_size=36)
@@ -2312,9 +2451,14 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
    PS_PremiumCompactField(ui,PS_CTRL_STOP_FIELD,
                           PS_UIFieldDisplay(PS_FIELD_STOP,model,calc,market,editor),
                            editor,PS_FIELD_STOP,false,false,11,12);
+   PS_PremiumFieldSuffix(ui,PS_CTRL_STOP_FIELD,PS_UIFieldDisplay(PS_FIELD_STOP,model,calc,market,editor),
+                         PS_UIStopPipsText(model,calc,market),11,12);
    PS_PremiumCompactField(ui,PS_CTRL_TAKE_FIELD,
                           PS_UIFieldDisplay(PS_FIELD_TAKE,model,calc,market,editor),
                            editor,PS_FIELD_TAKE,false,false,11,12);
+   PS_PremiumFieldSuffix(ui,PS_CTRL_TAKE_FIELD,PS_UIFieldDisplay(PS_FIELD_TAKE,model,calc,market,editor),
+                         PS_UITakePipsText(model,calc,market),11,12,
+                         PS_UITakeMoneyText(model,calc,market),PS_ThemeProfit());
    PS_PremiumCompactSmallControl(ui,PS_CTRL_ENTRY_MINUS,"−",false,23);
    PS_PremiumCompactSmallControl(ui,PS_CTRL_ENTRY_PLUS,"+",false,23);
    PS_PremiumCompactSmallControl(ui,PS_CTRL_ENTRY_COPY,"C",copy_feedback_control==PS_CTRL_ENTRY_COPY,21);
@@ -2329,6 +2473,7 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
    PS_PremiumLinesStateButton(compact_lines_rect,
                               (model.lines_visible ? "Lines shown" : "Lines hidden"),
                               (model.lines_visible ? PS_ThemeLabelBlue() : PS_ThemeText()),17);
+   PS_PremiumControlButton(ui,PS_CTRL_FILL,"Fill order window",false,PS_PREMIUM_BLUE,17);
 
     PS_PremiumRoundRect(PS_U(8),PS_U(223),PS_U(356),PS_U(185),5,PS_ThemeSection(),PS_ThemeBorder());
    PS_PremiumText(PS_U(16),PS_U(244),"Account",9,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
@@ -2377,7 +2522,8 @@ void PS_PremiumRenderCompact(PSUIState &ui,const PSModel &model,const PSCalcResu
                   (model.ask_confirmation ? "Confirmation: On" : "Confirmation: Off"),
                    11,confirm_color,TA_CENTER|TA_VCENTER,"Segoe UI Semibold");
 
-   PS_PremiumControlButton(ui,PS_CTRL_MOVE_SLS,"Move SLs to line",false,PS_PREMIUM_BLUE,21);
+   PS_PremiumControlButton(ui,PS_CTRL_MOVE_SLS,"SL to line",false,PS_PREMIUM_BLUE,21);
+   PS_PremiumControlButton(ui,PS_CTRL_MOVE_TPS,"TP to line",false,PS_PREMIUM_BLUE,21);
 
    color trade_color=(model.direction==PS_DIRECTION_LONG ? PS_PREMIUM_GREEN : PS_CLR_SHORT);
    string trade_text=PS_UITradeText(model,calc,market,false);
@@ -2475,9 +2621,14 @@ bool PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
    PS_PremiumCompactField(ui,PS_CTRL_STOP_FIELD,
                           PS_UIFieldDisplay(PS_FIELD_STOP,model,calc,market,editor),
                            editor,PS_FIELD_STOP,false,false,11,13);
+   PS_PremiumFieldSuffix(ui,PS_CTRL_STOP_FIELD,PS_UIFieldDisplay(PS_FIELD_STOP,model,calc,market,editor),
+                         PS_UIStopPipsText(model,calc,market),11,13);
    PS_PremiumCompactField(ui,PS_CTRL_TAKE_FIELD,
                           PS_UIFieldDisplay(PS_FIELD_TAKE,model,calc,market,editor),
                            editor,PS_FIELD_TAKE,false,false,11,13);
+   PS_PremiumFieldSuffix(ui,PS_CTRL_TAKE_FIELD,PS_UIFieldDisplay(PS_FIELD_TAKE,model,calc,market,editor),
+                         PS_UITakePipsText(model,calc,market),11,13,
+                         PS_UITakeMoneyText(model,calc,market),PS_ThemeProfit());
    PS_PremiumCompactSmallControl(ui,PS_CTRL_ENTRY_MINUS,"−",false,29);
    PS_PremiumCompactSmallControl(ui,PS_CTRL_ENTRY_PLUS,"+",false,29);
    PS_PremiumCompactSmallControl(ui,PS_CTRL_ENTRY_COPY,"C",
@@ -2495,6 +2646,7 @@ bool PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
    PS_PremiumLinesStateButton(full_lines_rect,
                               (model.lines_visible ? "Lines shown" : "Lines hidden"),
                               (model.lines_visible ? PS_ThemeLabelBlue() : PS_ThemeText()),17);
+   PS_PremiumControlButton(ui,PS_CTRL_FILL,"Fill order window",false,PS_PREMIUM_BLUE,17);
 
      PS_PremiumRoundRect(PS_U(10),PS_U(249),PS_U(418),PS_U(198),5,PS_ThemeSection(),PS_ThemeBorder());
     PS_PremiumText(PS_U(20),PS_U(269),"Account",10,PS_ThemeMuted(),TA_LEFT|TA_VCENTER);
@@ -2540,7 +2692,8 @@ bool PS_UIPremiumRender(PSUIState &ui,const PSModel &model,const PSCalcResult &c
    PS_PremiumButton(confirm_rect,
                     (model.ask_confirmation ? "Confirmation: On" : "Confirmation: Off"),
                      model.ask_confirmation,PS_PREMIUM_BLUE,21,true);
-   PS_PremiumControlButton(ui,PS_CTRL_MOVE_SLS,"Move SLs to line",false,PS_PREMIUM_BLUE,21);
+   PS_PremiumControlButton(ui,PS_CTRL_MOVE_SLS,"SL to line",false,PS_PREMIUM_BLUE,21);
+   PS_PremiumControlButton(ui,PS_CTRL_MOVE_TPS,"TP to line",false,PS_PREMIUM_BLUE,21);
 
    color direction_color=(model.direction==PS_DIRECTION_LONG ? PS_PREMIUM_GREEN : PS_CLR_SHORT);
    string trade_text=PS_UITradeText(model,calc,market,false);
@@ -2582,6 +2735,7 @@ bool PS_UIRenderPanel(PSUIState &ui,const PSModel &model,const PSCalcResult &cal
       return(false);
      }
    PS_UIUpdateLines(ui,model,market);
+   PS_UIUpdateStopPips(ui,model,market);
    g_ps_panel_render_ready=true;
    ui.dirty=false;
    PS_PerfCheck("render-panel",started,PS_RENDER_BUDGET_US);
@@ -2782,11 +2936,15 @@ bool PS_UIBeginPanelDrag(PSUIState &ui,const PSViewMode view_mode)
 
 void PS_UISetPanelPosition(PSUIState &ui,const int x,const int y,const PSViewMode view_mode)
   {
+   // Runs once per pointer frame while the panel is dragged, so it must not
+   // query the chart: reading the chart size waits for the chart's command
+   // queue, which still holds the previous frame's redraw. The size cached
+   // when the drag began is used to clamp; the full layout (control hit
+   // rectangles) is rebuilt by the render that follows the drop.
    int old_x=ui.panel_x;
    int old_y=ui.panel_y;
-   ui.panel_x=x;
-   ui.panel_y=y;
-   PS_UILayout(ui,view_mode);
+   ui.panel_x=PS_ClampInt(x,0,MathMax(0,ui.chart_w-ui.panel_w));
+   ui.panel_y=PS_ClampInt(y,0,MathMax(0,ui.chart_h-ui.panel_h));
    if(ui.panel_x==old_x && ui.panel_y==old_y) return;
    if(g_ps_panel_canvas_created)
      {
@@ -2818,6 +2976,7 @@ void PS_UIRenderLinesOnly(PSUIState &ui,const PSModel &model,const PSMarketSnaps
    ulong started=GetMicrosecondCount();
    PS_UIReadChartSize(ui);
    PS_UIUpdateLines(ui,model,market);
+   PS_UIUpdateStopPips(ui,model,market);
    ChartRedraw(ChartID());
    PS_PerfCheck("render-lines",started,PS_RENDER_BUDGET_US);
   }

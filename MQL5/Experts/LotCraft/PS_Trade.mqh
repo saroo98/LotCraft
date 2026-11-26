@@ -171,7 +171,7 @@ bool PS_TradeBuildSnapshot(const PSModel &model,const PSMarketSnapshot &market,c
    request.sl=snapshot.stop_loss;
    request.tp=snapshot.take_profit;
    request.deviation=0;
-   request.comment=PS_REQUEST_COMMENT;
+   // No order comment is ever set: requests carry no product name or label.
 
    if(!PS_TradeChooseFilling(market,model.order_mode==PS_ORDER_PENDING,request.type_filling,error))
      {
@@ -607,6 +607,326 @@ void PS_TradeExecuteSlBatch(PSSlTarget &targets[],int &succeeded,int &failed,str
       ResetLastError();
       bool local=OrderSend(request,result);
       PS_LogTradeResult("move SL",local,result);
+      if(local && (PS_TradeRetcodeAccepted(result.retcode) || result.retcode==TRADE_RETCODE_NO_CHANGES))
+        {
+         succeeded++;
+         details+=StringFormat("#%I64u: %s.\n",targets[i].ticket,PS_TradeRetcodeText(result.retcode));
+        }
+      else
+        {
+         failed++;
+         details+=StringFormat("#%I64u: %s (%u). %s\n",targets[i].ticket,
+                               PS_TradeRetcodeText(result.retcode),result.retcode,result.comment);
+        }
+     }
+  }
+
+bool PS_TradeTpNeedsChange(const double old_tp,const double target,const double tick_size)
+  {
+   if(old_tp<=0.0) return(true);
+   return(MathAbs(old_tp-target)>tick_size*0.5);
+  }
+
+bool PS_TradeValidateTargetTP(const PSDirection direction,const double target,const bool pending,
+                              const double pending_entry,const PSMarketSnapshot &market,string &error,
+                              const double pending_trigger=0.0)
+  {
+   error="";
+   if(!PS_IsPositiveFinite(target))
+     {
+      error="Target take-profit is not a positive finite price.";
+      return(false);
+     }
+   if((market.order_mode & SYMBOL_ORDER_TP)!=SYMBOL_ORDER_TP)
+     {
+      error="The broker does not allow Take Profit for this symbol.";
+      return(false);
+     }
+   double minimum=PS_MarketProtectiveDistance(market,!pending);
+   if(pending)
+     {
+      if(!PS_IsPositiveFinite(pending_entry))
+        {
+         error="Pending-order fill price is not a positive finite price.";
+         return(false);
+        }
+      // A take-profit must lie on the profit side of the eventual fill.
+      double distance=(direction==PS_DIRECTION_LONG ? target-pending_entry : pending_entry-target);
+      if(distance+PS_DOUBLE_EPS<minimum)
+        {
+         error="Pending-order target TP is on the wrong side of Entry or inside its stop distance.";
+         return(false);
+        }
+      double trigger=(pending_trigger>0.0 ? pending_trigger : pending_entry);
+      double quote=(direction==PS_DIRECTION_LONG ? market.tick.ask : market.tick.bid);
+      double freeze=(double)market.freeze_level_points*market.point;
+      if(!PS_IsPositiveFinite(trigger) || !PS_IsPositiveFinite(quote) ||
+         MathAbs(trigger-quote)+PS_DOUBLE_EPS<freeze)
+        {
+         error="The pending-order trigger is inside the broker freeze distance.";
+         return(false);
+        }
+      return(true);
+     }
+   // A long position closes at Bid, a short position at Ask.
+   if(direction==PS_DIRECTION_LONG)
+     {
+      if(target<market.tick.bid+minimum-PS_DOUBLE_EPS)
+        {
+         error="Long target TP is below or inside the current Bid stop/freeze distance.";
+         return(false);
+        }
+     }
+   else
+     {
+      if(target>market.tick.ask-minimum+PS_DOUBLE_EPS)
+        {
+         error="Short target TP is above or inside the current Ask stop/freeze distance.";
+         return(false);
+        }
+     }
+   return(true);
+  }
+
+int PS_TradeCollectTpTargets(const PSModel &model,const PSMarketSnapshot &market,PSTpTarget &targets[])
+  {
+   if(ArrayResize(targets,0)!=0) return(-1);
+   if(!PS_IsPositiveFinite(model.take_profit)) return(0);
+   double target=PS_NormalizePrice(model.take_profit,market);
+
+   int positions=PositionsTotal();
+   for(int i=0;i<positions;i++)
+     {
+      ulong ticket=PositionGetTicket(i);
+      if(ticket==0)
+        {
+         ArrayResize(targets,0);
+         return(-1);
+        }
+      string symbol=PositionGetString(POSITION_SYMBOL);
+      if(symbol!=market.symbol) continue;
+      ENUM_POSITION_TYPE type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      PSDirection direction=(type==POSITION_TYPE_BUY ? PS_DIRECTION_LONG : PS_DIRECTION_SHORT);
+      double old_tp=PositionGetDouble(POSITION_TP);
+      if(!PS_TradeTpNeedsChange(old_tp,target,market.tick_size)) continue;
+      string error="";
+      if(!PS_TradeValidateTargetTP(direction,target,false,0.0,market,error)) continue;
+
+      int index=ArraySize(targets);
+      if(ArrayResize(targets,index+1)!=index+1)
+        {
+         ArrayResize(targets,0);
+         return(-1);
+        }
+      ZeroMemory(targets[index]);
+      targets[index].is_position=true;
+      targets[index].ticket=ticket;
+      targets[index].symbol=symbol;
+      targets[index].direction=direction;
+      targets[index].entry=PositionGetDouble(POSITION_PRICE_OPEN);
+      targets[index].old_tp=old_tp;
+      targets[index].target_tp=target;
+     }
+
+   int orders=OrdersTotal();
+   for(int i=0;i<orders;i++)
+     {
+      ulong ticket=OrderGetTicket(i);
+      if(ticket==0)
+        {
+         ArrayResize(targets,0);
+         return(-1);
+        }
+      string symbol=OrderGetString(ORDER_SYMBOL);
+      if(symbol!=market.symbol) continue;
+      ENUM_ORDER_TYPE type=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+      if(!PS_IsBuyOrderType(type) && !PS_IsSellOrderType(type)) continue;
+      if(type==ORDER_TYPE_BUY || type==ORDER_TYPE_SELL) continue;
+      PSDirection direction=(PS_IsBuyOrderType(type) ? PS_DIRECTION_LONG : PS_DIRECTION_SHORT);
+      double trigger=OrderGetDouble(ORDER_PRICE_OPEN);
+      bool stop_limit=(type==ORDER_TYPE_BUY_STOP_LIMIT || type==ORDER_TYPE_SELL_STOP_LIMIT);
+      double entry=(stop_limit ? OrderGetDouble(ORDER_PRICE_STOPLIMIT) : trigger);
+      double old_tp=OrderGetDouble(ORDER_TP);
+      if(!PS_TradeTpNeedsChange(old_tp,target,market.tick_size)) continue;
+      string error="";
+      if(!PS_TradeValidateTargetTP(direction,target,true,entry,market,error,trigger)) continue;
+
+      int index=ArraySize(targets);
+      if(ArrayResize(targets,index+1)!=index+1)
+        {
+         ArrayResize(targets,0);
+         return(-1);
+        }
+      ZeroMemory(targets[index]);
+      targets[index].is_position=false;
+      targets[index].ticket=ticket;
+      targets[index].symbol=symbol;
+      targets[index].direction=direction;
+      targets[index].entry=entry;
+      targets[index].old_tp=old_tp;
+      targets[index].target_tp=target;
+     }
+   if(positions!=PositionsTotal() || orders!=OrdersTotal())
+     {
+      ArrayResize(targets,0);
+      return(-1);
+     }
+   return(ArraySize(targets));
+  }
+
+bool PS_TradeTpTargetSetsEqual(const PSTpTarget &a[],const PSTpTarget &b[],const double tick_size)
+  {
+   int count=ArraySize(a);
+   if(count!=ArraySize(b)) return(false);
+   for(int i=0;i<count;i++)
+     {
+      if(a[i].is_position!=b[i].is_position || a[i].ticket!=b[i].ticket ||
+         a[i].symbol!=b[i].symbol || a[i].direction!=b[i].direction) return(false);
+      if(MathAbs(a[i].old_tp-b[i].old_tp)>tick_size*0.5) return(false);
+      if(MathAbs(a[i].target_tp-b[i].target_tp)>tick_size*0.5) return(false);
+      if(!a[i].is_position && MathAbs(a[i].entry-b[i].entry)>tick_size*0.5) return(false);
+     }
+   return(true);
+  }
+
+string PS_TradeTpConfirmationText(const PSModel &model,const PSMarketSnapshot &market,const PSTpTarget &targets[])
+  {
+   int count=ArraySize(targets);
+   string detail="";
+   for(int i=0;i<count;i++)
+     {
+      string kind=(targets[i].is_position ? "Position" : "Pending order");
+      string old_text=(targets[i].old_tp>0.0 ? PS_PriceText(targets[i].old_tp,market) : "none");
+      detail+=StringFormat("\n%s #%I64u: TP %s -> %s",kind,targets[i].ticket,old_text,
+                           PS_PriceText(targets[i].target_tp,market));
+     }
+   return(StringFormat("Symbol: %s\nDirection scope: all valid positions and pending orders\nTarget take-profit: %s\nEligible positions/pending orders: %d%s\n\nEvery eligible take-profit that differs from the green line will be moved to that exact price. Stop-losses, entries and volumes remain unchanged.\n\nApply these take-profit modifications?",
+                       market.symbol,PS_PriceText(model.take_profit,market),count,detail));
+  }
+
+bool PS_TradeBuildTpRequest(const PSTpTarget &target,MqlTradeRequest &request,string &error)
+  {
+   ZeroMemory(request);
+   error="";
+   if(target.is_position)
+     {
+      if(!PositionSelectByTicket(target.ticket))
+        {
+         error="Position no longer exists.";
+         return(false);
+        }
+      string position_symbol=PositionGetString(POSITION_SYMBOL);
+      ENUM_POSITION_TYPE position_type=(ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      if(position_type!=POSITION_TYPE_BUY && position_type!=POSITION_TYPE_SELL)
+        {
+         error="Position type is no longer eligible.";
+         return(false);
+        }
+      PSDirection position_direction=(position_type==POSITION_TYPE_BUY ? PS_DIRECTION_LONG : PS_DIRECTION_SHORT);
+      if(position_symbol!=target.symbol || position_direction!=target.direction)
+        {
+         error="Position symbol or direction changed after eligibility was established.";
+         return(false);
+        }
+      request.action=TRADE_ACTION_SLTP;
+      request.position=target.ticket;
+      request.symbol=position_symbol;
+      // The stop-loss is copied from the live position and never changed here.
+      request.sl=PositionGetDouble(POSITION_SL);
+      request.tp=target.target_tp;
+      return(true);
+     }
+
+   if(!OrderSelect(target.ticket))
+     {
+      error="Pending order no longer exists.";
+      return(false);
+     }
+   string live_symbol=OrderGetString(ORDER_SYMBOL);
+   ENUM_ORDER_TYPE live_type=(ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
+   bool live_buy=PS_IsBuyOrderType(live_type);
+   bool live_sell=PS_IsSellOrderType(live_type);
+   if((!live_buy && !live_sell) || live_type==ORDER_TYPE_BUY || live_type==ORDER_TYPE_SELL)
+     {
+      error="Order is no longer an eligible pending order.";
+      return(false);
+     }
+   PSDirection live_direction=(live_buy ? PS_DIRECTION_LONG : PS_DIRECTION_SHORT);
+   if(live_symbol!=target.symbol || live_direction!=target.direction)
+     {
+      error="Pending-order symbol or direction changed after eligibility was established.";
+      return(false);
+     }
+   request.action=TRADE_ACTION_MODIFY;
+   request.order=target.ticket;
+   request.symbol=live_symbol;
+   request.price=OrderGetDouble(ORDER_PRICE_OPEN);
+   request.stoplimit=OrderGetDouble(ORDER_PRICE_STOPLIMIT);
+   request.sl=OrderGetDouble(ORDER_SL);
+   request.tp=target.target_tp;
+   request.type=live_type;
+   request.type_time=(ENUM_ORDER_TYPE_TIME)OrderGetInteger(ORDER_TYPE_TIME);
+   request.expiration=(datetime)OrderGetInteger(ORDER_TIME_EXPIRATION);
+   request.type_filling=(ENUM_ORDER_TYPE_FILLING)OrderGetInteger(ORDER_TYPE_FILLING);
+   return(true);
+  }
+
+void PS_TradeExecuteTpBatch(PSTpTarget &targets[],int &succeeded,int &failed,string &details)
+  {
+   succeeded=0;
+   failed=0;
+   details="";
+   for(int i=0;i<ArraySize(targets);i++)
+     {
+      PSMarketSnapshot current;
+      if(!PS_MarketAcquire(current))
+        {
+         failed++;
+         details+=StringFormat("#%I64u: market refresh failed: %s\n",targets[i].ticket,current.error);
+         continue;
+        }
+      if(current.symbol!=targets[i].symbol)
+        {
+         failed++;
+         details+=StringFormat("#%I64u: symbol changed; skipped.\n",targets[i].ticket);
+         continue;
+        }
+      string error="";
+      if(!PS_TradePermissions(current,targets[i].direction,error))
+        {
+         failed++;
+         details+=StringFormat("#%I64u: %s\n",targets[i].ticket,error);
+         continue;
+        }
+      MqlTradeRequest request={};
+      if(!PS_TradeBuildTpRequest(targets[i],request,error))
+        {
+         failed++;
+         details+=StringFormat("#%I64u: %s\n",targets[i].ticket,error);
+         continue;
+        }
+      double live_old_tp=(targets[i].is_position ? PositionGetDouble(POSITION_TP) : OrderGetDouble(ORDER_TP));
+      bool stop_limit=(request.type==ORDER_TYPE_BUY_STOP_LIMIT || request.type==ORDER_TYPE_SELL_STOP_LIMIT);
+      double live_entry=(targets[i].is_position ? PositionGetDouble(POSITION_PRICE_OPEN)
+                         : (stop_limit ? request.stoplimit : request.price));
+      if(!PS_TradeTpNeedsChange(live_old_tp,targets[i].target_tp,current.tick_size) ||
+         !PS_TradeValidateTargetTP(targets[i].direction,targets[i].target_tp,!targets[i].is_position,
+                                  live_entry,current,error,request.price))
+        {
+         failed++;
+         details+=StringFormat("#%I64u: no longer eligible: %s\n",targets[i].ticket,error);
+         continue;
+        }
+      if(!PS_TradeCheckRequest(request,error))
+        {
+         failed++;
+         details+=StringFormat("#%I64u: %s\n",targets[i].ticket,error);
+         continue;
+        }
+      MqlTradeResult result={};
+      ResetLastError();
+      bool local=OrderSend(request,result);
+      PS_LogTradeResult("move TP",local,result);
       if(local && (PS_TradeRetcodeAccepted(result.retcode) || result.retcode==TRADE_RETCODE_NO_CHANGES))
         {
          succeeded++;

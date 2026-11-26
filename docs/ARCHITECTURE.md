@@ -118,6 +118,23 @@ The main action uses this guarded sequence:
 9. Run `OrderSend()` once.
 10. Treat only accepted server retcodes as success and report the actual retcode, order ID, and deal ID when available.
 
+The duplicate-submit interval is stamped before the blocking send and again when it returns, so input queued behind a slow send is still rejected. Requests never set an order comment: no product name, version or other label is sent with an order or a modification.
+
+The panel paints no status line. A new order that was requested but not placed (pre-send validation, a changed snapshot after confirmation, `OrderCheck()` or `OrderSend()` failure) is therefore written to the Experts log and shown in a dialog.
+
+Pointer safety rules:
+
+- Release detection reads the logical primary mouse button, so swapped (left-handed) buttons behave like chart mouse events.
+- A press where the open exposure details overlap the panel activates nothing. Inside the details, a press never captures a level handle.
+- A panel canvas deleted by another program is recreated on the next paint.
+
+Keyboard activation is deliberately narrower than pointer activation:
+
+- Only `Tab`/`Shift+Tab` give an action control keyboard focus. A pointer press clears keyboard focus everywhere; it is given back only to an editable field so `Tab` continues from that field.
+- `Enter`/`Space` ignore auto-repeat (previous-key-state bit 14 of the delivered flags).
+- Activating `Trade` or `Move SLs to line` from the keyboard spends the focus. Another keyboard send needs another `Tab`.
+- A confirmation opened by a keyboard activation defaults to `No`, because a key still held from the activation auto-repeats into the modal dialog. Pointer-opened confirmations keep `Yes` as the default.
+
 ## 9. `Move SLs to line`
 
 Eligibility is every open position and active pending order on the current chart symbol, regardless of the panel's selected direction. A target is included when the red-line SL is valid for that entity and its current SL differs from the red-line price by more than half a tick. This permits both tightening and widening because the button's explicit purpose is exact alignment to the user-positioned line.

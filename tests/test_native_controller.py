@@ -98,16 +98,18 @@ int main() {
     compile_and_run(tmp_path, source)
 
 
-def test_waiting_panel_cannot_activate_stale_keyboard_focus(tmp_path):
+def keyboard_activation_source() -> str:
     source = r'''
 #include <string>
 #include <cassert>
 using string=std::string;
 ''' + declaration(EDITOR, "PSEditKeyResult") + r'''
 using uint=unsigned int;
-const int PS_CTRL_NONE=-1,PS_CTRL_COUNT=40;
+using PSControlId=int;
+const int PS_CTRL_NONE=-1,PS_CTRL_COUNT=40,PS_CTRL_MOVE_SLS=30,PS_CTRL_TRADE=31;
 bool g_initialized=true,g_symbol_transition_pending=true;
-bool g_ps_panel_render_ready=true;
+bool g_ps_panel_render_ready=true,g_action_from_keyboard=false;
+int last_action=PS_CTRL_NONE;bool keyboard_flag_during_action=false;
 bool g_shift_down=false,g_ctrl_down=false,g_panel_dirty=false;
 bool g_shift_state_known=false,g_ctrl_state_known=false;
 uint g_shift_pressed_keys=0,g_ctrl_pressed_keys=0;
@@ -134,7 +136,7 @@ void PS_KeyboardFocusNext(bool) {++tabs;}
 void PS_CancelEditor() {}
 void PS_SaveState() {}
 void PS_RenderIfDirty() {}
-void PS_Action(int) {++actions;}
+void PS_Action(int control) {++actions;last_action=control;keyboard_flag_during_action=g_action_from_keyboard;}
 void PS_UIGuardEnter(UI&) {}
 PSEditKeyResult PS_EditorKey(PSEditorState&,int,bool,bool) {return PS_EDIT_KEY_NONE;}
 void PS_EditorApplyRaw(PSEditorState&,int&,int,bool,string&) {}
@@ -156,7 +158,11 @@ void PS_LogWarningRateLimited(const string&,const string&,int){}
     source += extract_functions("MQL5/Experts/LotCraft/PS_Platform.mqh", "PS_PlatformKeyboardModifiers", "PS_PlatformModifierSide")
     source += extract_functions(EA, "PS_ObserveKeyboardModifier")
     source += extract_functions(EA, "PS_ResetShortcutContext", "PS_RecordShortcutContext", "PS_KeyboardShortcutBit", "PS_ExecuteEditorKey", "PS_HandleKeyDown")
-    source += r'''
+    return source
+
+
+def test_waiting_panel_cannot_activate_stale_keyboard_focus(tmp_path):
+    source = keyboard_activation_source() + r'''
 int main() {
   g_ps_control_visible[1]=true;
   PS_HandleKeyDown(13); PS_HandleKeyDown(9);
@@ -170,6 +176,37 @@ int main() {
   PS_HandleKeyDown(13); assert(actions==1);
   g_initialized=false;g_ps_control_visible[1]=true;
   PS_HandleKeyDown(13);assert(actions==1);
+}
+'''
+    compile_and_run(tmp_path, source)
+
+
+def test_keyboard_activation_ignores_auto_repeat_and_spends_order_focus(tmp_path):
+    # Bit 14 of the delivered key flags is the previous key state (auto-repeat).
+    source = keyboard_activation_source() + r'''
+int main() {
+  g_symbol_transition_pending=false;
+  g_ps_control_visible[1]=g_ps_control_visible[PS_CTRL_TRADE]=g_ps_control_visible[PS_CTRL_MOVE_SLS]=true;
+  PS_HandleKeyDown(13,0x4000);PS_HandleKeyDown(32,0x4000);
+  assert(actions==0);
+  PS_HandleKeyDown(13);
+  assert(actions==1 && last_action==1 && g_keyboard_focus==1);
+  assert(keyboard_flag_during_action && !g_action_from_keyboard);
+
+  g_keyboard_focus=PS_CTRL_TRADE;g_panel_dirty=false;
+  PS_HandleKeyDown(13,0x4000);
+  assert(actions==1 && g_keyboard_focus==PS_CTRL_TRADE);
+  PS_HandleKeyDown(13);
+  assert(actions==2 && last_action==PS_CTRL_TRADE && keyboard_flag_during_action);
+  assert(g_keyboard_focus==PS_CTRL_NONE && g_panel_dirty && !g_action_from_keyboard);
+  PS_HandleKeyDown(13);PS_HandleKeyDown(32);PS_HandleKeyDown(13,0x4000);
+  assert(actions==2);
+
+  g_keyboard_focus=PS_CTRL_MOVE_SLS;
+  PS_HandleKeyDown(32);
+  assert(actions==3 && last_action==PS_CTRL_MOVE_SLS && g_keyboard_focus==PS_CTRL_NONE);
+  PS_HandleKeyDown(32);
+  assert(actions==3);
 }
 '''
     compile_and_run(tmp_path, source)
@@ -191,6 +228,7 @@ bool quote_available=false;
 ulong GetTickCount64(){return 2000;}
 void PS_MarketAcquire(PSMarketSnapshot &s){s.symbol=next_symbol;}
 void PS_SaveState(){}
+void PS_DiscardUncommittedEdit(){}
 void PS_AbortInteractionForContextChange(){}
 void PS_CopyMarketSnapshot(PSMarketSnapshot &a,const PSMarketSnapshot &b){a=b;}
 bool PS_BuildFreshPlan(string &error){error="no quote";return quote_available;}
@@ -327,8 +365,8 @@ int main(){
     compile_and_run(tmp_path, source)
 
 
-def test_new_order_confirmation_is_single_stage_and_sends_fresh_snapshot(tmp_path):
-    source = r'''
+def new_order_source() -> str:
+    return r'''
 #include <string>
 #include <cassert>
 using string=std::string;
@@ -336,27 +374,56 @@ using ulong=unsigned long long;
 struct PSTradeSnapshot{int revision=0;};
 struct MqlTradeResult{ulong order=0,deal=0;unsigned retcode=0;};
 struct Model{bool ask_confirmation=true;} g_model;
-bool g_trade_in_flight=false,refresh_valid=true;
-ulong g_last_submit_ms=0;
-int g_market=0,builds=0,dialogs=0,sends=0,sent_revision=0,approval=1;
-const int IDYES=1,MB_YESNO=1,MB_ICONQUESTION=2;
+bool g_trade_in_flight=false,refresh_valid=true,g_action_from_keyboard=false;
+ulong g_last_submit_ms=0,clock_ms=2000,send_duration_ms=0;
+int g_market=0,builds=0,dialogs=0,sends=0,sent_revision=0,approval=1,dialog_flags=0;
+const int IDYES=1,MB_YESNO=1,MB_ICONQUESTION=2,MB_DEFBUTTON2=256;
 const string PS_PRODUCT_NAME="LotCraft",PS_VERSION_TEXT="test";
-ulong GetTickCount64(){return 2000;}
+ulong GetTickCount64(){return clock_ms;}
 void PS_SetStatus(const string&,bool,int=0){}
+int failures=0;void PS_ReportTradeFailure(const string&){++failures;}
 bool PS_CommitEditor(){return true;}
 bool PS_BuildFreshTradeSnapshot(PSTradeSnapshot &s,string&){s.revision=++builds;return builds!=2||refresh_valid;}
 string PS_TradeConfirmationText(const PSTradeSnapshot&,int){return "risk";}
-int MessageBox(const string&,const string&,int){++dialogs;return approval;}
+int MessageBox(const string&,const string&,int flags){++dialogs;dialog_flags=flags;return approval;}
 void PS_CopyTradeSnapshot(PSTradeSnapshot &a,const PSTradeSnapshot&b){a=b;}
 bool PS_TradeSendSnapshot(const PSTradeSnapshot &s,MqlTradeResult&,string&){
-  assert(g_trade_in_flight);++sends;sent_revision=s.revision;return true;
+  assert(g_trade_in_flight);++sends;sent_revision=s.revision;clock_ms+=send_duration_ms;return true;
 }
 template<class... Args> string StringFormat(const char*,Args...){return "test";}
 string PS_TradeRetcodeText(unsigned){return "DONE";}
 void PS_RefreshMarket(bool){}
 void reset(){builds=dialogs=sends=sent_revision=0;g_last_submit_ms=0;}
+''' + extract_functions(EA, "PS_ConfirmationFlags", "PS_DoTrade")
+
+
+def test_slow_send_keeps_duplicate_guard_and_keyboard_dialog_defaults_to_no(tmp_path):
+    source = new_order_source() + r'''
+int main(){
+  g_model.ask_confirmation=false;send_duration_ms=5000;
+  PS_DoTrade();assert(sends==1);
+  // Input queued behind a blocking send is dispatched as soon as it returns.
+  PS_DoTrade();assert(sends==1);
+  clock_ms+=749;PS_DoTrade();assert(sends==1);
+  clock_ms+=1;PS_DoTrade();assert(sends==2);
+
+  g_model.ask_confirmation=true;send_duration_ms=0;
+  clock_ms+=10000;g_action_from_keyboard=true;PS_DoTrade();
+  assert(dialogs==1 && (dialog_flags&MB_DEFBUTTON2)!=0 && (dialog_flags&MB_YESNO)!=0);
+  clock_ms+=10000;g_action_from_keyboard=false;PS_DoTrade();
+  assert(dialogs==2 && (dialog_flags&MB_DEFBUTTON2)==0 && (dialog_flags&MB_YESNO)!=0);
+
+  // A request that was asked for but not placed is reported, never silent.
+  assert(failures==0);
+  reset();clock_ms+=10000;refresh_valid=false;PS_DoTrade();
+  assert(sends==0 && failures==1);
+}
 '''
-    source += extract_functions(EA, "PS_DoTrade")
+    compile_and_run(tmp_path, source)
+
+
+def test_new_order_confirmation_is_single_stage_and_sends_fresh_snapshot(tmp_path):
+    source = new_order_source()
     source += r'''
 int main(){
   PS_DoTrade();

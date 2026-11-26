@@ -55,11 +55,11 @@ def test_product_identity_is_consistent():
     types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
     assert '#property copyright "LotCraft"' in main
     # MetaEditor accepts only a two-part numeric #property version. The
-    # user-facing semantic release is 1.2.4 while persistence remains schema v100.
-    assert '#property version   "1.24"' in main
-    assert '#property description "LotCraft 1.2.4"' in main
+    # user-facing semantic release is 2.0.0 while persistence remains schema v100.
+    assert '#property version   "2.00"' in main
+    assert '#property description "LotCraft 2.0.0"' in main
     assert '#define PS_PRODUCT_NAME              "LotCraft"' in types
-    assert '#define PS_VERSION_TEXT              "1.2.4"' in types
+    assert '#define PS_VERSION_TEXT              "2.0.0"' in types
     assert '#define PS_SOURCE_NAME               "LotCraft.mq5"' in types
     assert '#define PS_BINARY_NAME               "LotCraft.ex5"' in types
     assert '#define PS_LOG_PREFIX                "LotCraft"' in types
@@ -185,7 +185,7 @@ def test_exact_internal_interactive_control_inventory():
         "PS_CTRL_ORDER_MODE", "PS_CTRL_LINES", "PS_CTRL_COMMISSION_MODE", "PS_CTRL_COMMISSION_FIELD",
         "PS_CTRL_ACCOUNT_MODE", "PS_CTRL_ACCOUNT_FIELD", "PS_CTRL_RISK_PERCENT_FIELD",
         "PS_CTRL_RISK_MONEY_FIELD", "PS_CTRL_ACTUAL_PERCENT", "PS_CTRL_ACTUAL_MONEY",
-        "PS_CTRL_POSITION_SIZE", "PS_CTRL_POSITION_COPY", "PS_CTRL_EXPOSURE_SUMMARY", "PS_CTRL_MOVE_SLS", "PS_CTRL_CONFIRM",
+        "PS_CTRL_POSITION_SIZE", "PS_CTRL_POSITION_COPY", "PS_CTRL_EXPOSURE_SUMMARY", "PS_CTRL_MOVE_SLS", "PS_CTRL_MOVE_TPS", "PS_CTRL_FILL", "PS_CTRL_CONFIRM",
         "PS_CTRL_TRADE",
     ]
     assert controls == expected
@@ -381,7 +381,7 @@ def test_compact_full_panel_omits_unneeded_summary_and_commission_rows():
 def test_one_new_order_creation_control_path_and_separate_sl_modification_path():
     trade = (SRC / "PS_Trade.mqh").read_text(encoding="utf-8")
     main = MAIN.read_text(encoding="utf-8")
-    assert trade.count("OrderSend(") == 2
+    assert trade.count("OrderSend(") == 3
     assert main.count("PS_DoTrade();") == 1
     assert main.count("PS_DoMoveStops();") == 1
     assert "TRADE_ACTION_DEAL" in trade
@@ -1121,7 +1121,7 @@ def test_release_source_uses_metaeditor_compatible_constant_forms():
     main = MAIN.read_text(encoding="utf-8")
     logging = (SRC / "PS_Logging.mqh").read_text(encoding="utf-8")
     ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
-    assert '#property version   "1.24"' in main
+    assert '#property version   "2.00"' in main
     assert not re.search(r"(?m)^\s*#if\s+(?!def\b|ndef\b)", logging)
     assert "const color text_color=C'154,164,181'" in ui
 
@@ -1155,3 +1155,225 @@ def test_all_new_trade_requests_use_zero_magic_number():
     trade = (SRC / "PS_Trade.mqh").read_text(encoding="utf-8")
     assert "request.magic=0;" in trade
     assert "PS_TradeMagic" not in trade
+
+
+def test_trade_requests_never_carry_a_comment_or_product_label():
+    trade = (SRC / "PS_Trade.mqh").read_text(encoding="utf-8")
+    code = strip_comments_and_strings(ALL_SOURCE)
+    assert "PS_REQUEST_COMMENT" not in ALL_SOURCE
+    assert "request.comment" not in strip_comments_and_strings(trade)
+    assert not re.search(r"\.comment\s*=\s*(?!source\.comment)", code)
+
+
+def test_pointer_press_never_arms_an_action_control_for_keyboard_activation():
+    main = MAIN.read_text(encoding="utf-8")
+    press = re.search(r"void PS_MousePress.*?\n  \}", main, re.S).group(0)
+    assert press.index("g_keyboard_focus=PS_CTRL_NONE;") < press.index("PS_UIInPanel(g_ui,x,y)")
+    assert press.count("g_keyboard_focus=control;") == 1
+    assert press.index("PS_UIControlIsEditable(control,g_model))") < press.index("g_keyboard_focus=control;")
+    assert press.index("g_keyboard_focus=control;") < press.index("PS_ControlIsStepper(control)")
+
+
+def test_keyboard_activation_filters_repeats_and_order_dialogs_share_one_flag_source():
+    main = MAIN.read_text(encoding="utf-8")
+    key_down = re.search(r"void PS_HandleKeyDown.*?\n  \}", main, re.S).group(0)
+    assert key_down.index("if((flags & 0x4000)!=0) return;") < key_down.index("PS_Action(activated);")
+    assert "PS_Action(g_keyboard_focus);" not in main
+    flags = re.search(r"int PS_ConfirmationFlags\(\).*?\n  \}", main, re.S).group(0)
+    assert "g_action_from_keyboard ? MB_DEFBUTTON2 : 0" in flags
+    assert main.count("MB_YESNO") == 1
+    assert main.count("PS_ConfirmationFlags());") == 4
+    for name in ("PS_DoTrade", "PS_DoMoveStops"):
+        body = re.search(rf"void {name}\(\).*?\n  \}}", main, re.S).group(0)
+        assert body.count("g_last_submit_ms=GetTickCount64();") == 2
+
+
+def test_release_detection_follows_the_logical_primary_mouse_button():
+    platform = (SRC / "PS_Platform.mqh").read_text(encoding="utf-8")
+    body = re.search(r"bool PS_PlatformLeftButtonDown\(\).*?\n  \}", platform, re.S).group(0)
+    assert "GetSystemMetrics(PS_SM_SWAPBUTTON)!=0 ? PS_VK_RBUTTON : PS_VK_LBUTTON" in body
+    assert "GetAsyncKeyState(primary)" in body
+    assert "#define PS_SM_SWAPBUTTON  23" in platform
+    assert "#define PS_VK_RBUTTON     0x02" in platform
+
+
+def test_externally_deleted_panel_canvas_is_recreated_before_painting():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    ensure = re.search(r"bool PS_UIPanelCanvasEnsure.*?\n  \}", ui, re.S).group(0)
+    lost = "if(g_ps_panel_canvas_created && ObjectFind(ChartID(),name)<0) PS_UIPanelCanvasDestroy();"
+    assert ensure.index(lost) < ensure.index("if(!g_ps_panel_canvas_created)")
+
+
+def test_exposure_details_overlap_never_activates_a_covered_control_or_handle():
+    main = MAIN.read_text(encoding="utf-8")
+    press = re.search(r"void PS_MousePress.*?\n  \}", main, re.S).group(0)
+    overlap = press.index("if(in_sidecar && PS_UIInPanel(g_ui,x,y))")
+    assert overlap < press.index("PS_UIHitControl(x,y)")
+    swallowed = press[overlap:press.index("PS_UIHitControl(x,y)")]
+    assert "return;" in swallowed and "PS_Action" not in swallowed and "capture=" not in swallowed
+    assert "if(handle_hit && !in_sidecar)" in press
+
+
+def test_requested_orders_that_are_not_placed_are_logged_and_shown():
+    main = MAIN.read_text(encoding="utf-8")
+    report = re.search(r"void PS_ReportTradeFailure.*?\n  \}", main, re.S).group(0)
+    assert "PS_LogWarning(text);" in report and "MessageBox(text," in report
+    trade = re.search(r"void PS_DoTrade\(\).*?\n  \}", main, re.S).group(0)
+    assert trade.count("PS_ReportTradeFailure(") == 3
+    assert "PS_SetStatus(error,true" not in trade
+
+
+def test_panel_position_survives_reinitialization():
+    main = MAIN.read_text(encoding="utf-8")
+    init = re.search(r"int OnInit\(\).*?\n  \}", main, re.S).group(0)
+    deinit = re.search(r"void OnDeinit.*?\n  \}", main, re.S).group(0)
+    assert init.index("g_persistence_base=PS_PersistenceBase(g_market);") < init.index("PS_LoadPanelPosition();")
+    assert init.index("g_ui.panel_y=28;") < init.index("PS_LoadPanelPosition();") < init.index("PS_UICreate(g_ui)")
+    assert deinit.index("PS_SavePanelPosition();") < deinit.index("PS_UIDeleteOwned(g_ui);")
+
+
+def test_symbol_change_discards_an_uncommitted_edit_before_saving_the_old_plan():
+    main = MAIN.read_text(encoding="utf-8")
+    refresh = re.search(r"void PS_RefreshMarket.*?\n  \}", main, re.S).group(0)
+    assert refresh.index("PS_DiscardUncommittedEdit();") < refresh.index("PS_SaveState();")
+    discard = re.search(r"void PS_DiscardUncommittedEdit.*?\n  \}", main, re.S).group(0)
+    assert "if(g_editor.active) PS_EditorCancel(g_editor,g_model);" in discard
+
+
+def test_risk_percent_text_keeps_the_four_decimals_the_editor_accepts():
+    types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
+    body = re.search(r"string PS_PercentText.*?\n  \}", types, re.S).group(0)
+    assert "DoubleToString(value,4)" in body and "trimmed<2" in body
+    assert "DoubleToString(value,2)" not in body
+
+
+def test_pip_size_and_text_follow_quote_precision():
+    types = (SRC / "PS_Types.mqh").read_text(encoding="utf-8")
+    size = re.search(r"double PS_PipSize.*?\n  \}", types, re.S).group(0)
+    assert "if(PS_IsPositiveFinite(market.pip_size)) return(market.pip_size);" in size
+    market = (SRC / "PS_Market.mqh").read_text(encoding="utf-8")
+    classify = re.search(r"double PS_MarketPipSize.*?\n  \}", market, re.S).group(0)
+    assert classify.index('StringFind(name,"XAG")==0') < classify.index("if(crypto)") < classify.index("if(forex)") < classify.index("if(share)")
+    assert "market.pip_size=PS_MarketPipSize(market);" in market
+    text = re.search(r"string PS_PipsText.*?\n  \}", types, re.S).group(0)
+    assert '+" pips"' in text and "MathAbs(distance)/pip" in text
+
+
+def test_stop_marker_shows_live_pips_outside_its_hit_region_and_field_shows_them_too():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    pips = re.search(r"void PS_UIUpdateStopPips.*?\n  \}", ui, re.S).group(0)
+    assert "rect.y+rect.h+PS_U(2) : rect.y-PS_U(2)" in pips
+    assert "below ? ANCHOR_UPPER : ANCHOR_LOWER" in pips
+    assert "g_ps_handle_rects[index]=" not in pips
+    lines_only = re.search(r"void PS_UIRenderLinesOnly.*?\n  \}", ui, re.S).group(0)
+    assert lines_only.index("PS_UIUpdateLines(ui,model,market);") < lines_only.index("PS_UIUpdateStopPips(ui,model,market);")
+    assert ui.count("PS_UIUpdateStopPips(ui,model,market);") == 2
+    assert ui.count("PS_PremiumFieldSuffix(ui,PS_CTRL_STOP_FIELD,") == 2
+    hide = re.search(r"void PS_UIHidePlanningLines.*?\n  \}", ui, re.S).group(0)
+    assert '"handle.stop.pips",false' in hide
+
+
+def test_marker_letter_is_centred_on_its_inked_pixels():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    ensure = re.search(r"bool PS_UIEnsureHandleCanvas.*?\n  \}", ui, re.S).group(0)
+    assert ensure.index("PS_UIHandleGlyphOffset(index,text,width,height,glyph_dx,glyph_dy);") < ensure.index("width/2+glyph_dx,height/2+glyph_dy")
+    assert "PixelGet(x,y)" in ui
+
+
+def test_markers_follow_a_price_scale_change_on_the_timer_frame():
+    main = MAIN.read_text(encoding="utf-8")
+    timer = re.search(r"void OnTimer\(\).*?\n  \}", main, re.S).group(0)
+    assert timer.index("PS_TrackPriceScale();") < timer.index("PS_RenderIfDirty();")
+    track = re.search(r"void PS_TrackPriceScale.*?\n  \}", main, re.S).group(0)
+    assert "CHART_PRICE_MIN" in track and "CHART_PRICE_MAX" in track
+    assert "g_ui.line_dirty=true;" in track and "g_exposure_labels_dirty=true;" in track
+
+
+def test_take_profit_batch_never_changes_stop_loss_and_aborts_on_a_changed_set():
+    trade = (SRC / "PS_Trade.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    build = re.search(r"bool PS_TradeBuildTpRequest.*?\n  \}", trade, re.S).group(0)
+    assert "request.sl=PositionGetDouble(POSITION_SL);" in build
+    assert "request.sl=OrderGetDouble(ORDER_SL);" in build
+    assert build.count("request.tp=target.target_tp;") == 2
+    assert "request.volume" not in build and "TRADE_ACTION_DEAL" not in build
+    validate = re.search(r"bool PS_TradeValidateTargetTP.*?\n  \}", trade, re.S).group(0)
+    assert "target<market.tick.bid+minimum-PS_DOUBLE_EPS" in validate
+    assert "target>market.tick.ask-minimum+PS_DOUBLE_EPS" in validate
+    takes = re.search(r"void PS_DoMoveTakes\(\).*?\n  \}", main, re.S).group(0)
+    assert takes.index("PS_TradeTpTargetSetsEqual(targets,refreshed") < takes.index("PS_TradeExecuteTpBatch(")
+    assert "PS_ConfirmationFlags()" in takes
+    assert takes.count("g_last_submit_ms=GetTickCount64();") == 2
+    assert main.count("PS_DoMoveTakes();") == 1
+
+
+def test_line_action_slot_is_split_between_stop_and_take_buttons():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    assert ui.count("const int line_action_w=(action_w-action_gap)/2;") == 2
+    assert ui.count('PS_PremiumControlButton(ui,PS_CTRL_MOVE_SLS,"SL to line"') == 2
+    assert ui.count('PS_PremiumControlButton(ui,PS_CTRL_MOVE_TPS,"TP to line"') == 2
+
+
+def test_take_marker_shows_pips_on_the_side_away_from_entry():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    pips = re.search(r"void PS_UIUpdateStopPips.*?\n  \}", ui, re.S).group(0)
+    assert '"handle.stop.pips" : "handle.take.pips"' in pips
+    assert "bool below=(stop ? long_plan : !long_plan);" in pips
+    hide = re.search(r"void PS_UIHidePlanningLines.*?\n  \}", ui, re.S).group(0)
+    assert '"handle.take.pips",false' in hide
+
+
+def test_fill_only_types_numbers_and_never_reaches_a_send_button():
+    platform = (SRC / "PS_Platform.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    code = strip_comments_and_strings(ALL_SOURCE)
+    # Buy/Sell/OK button identifiers of the MT5 order window must not exist.
+    for send_button in ["10408", "10409", "10411", "11134", "11135"]:
+        assert not re.search(rf"\b{send_button}\b", code)
+    typing = re.search(r"bool PS_PlatformTypeIntoEdit.*?\n  \}", platform, re.S).group(0)
+    assert "PS_WM_CHAR" in typing and "PS_EM_SETSEL" in typing
+    assert "(ch>='0' && ch<='9') || ch=='.'" in typing
+    assert "edit_id!=PS_ORDER_EDIT_VOLUME && edit_id!=PS_ORDER_EDIT_STOP" in typing
+    tab = re.search(r"bool PS_PlatformOrderDialogSelectTab.*?\n  \}", platform, re.S).group(0)
+    assert "tab_id!=PS_ORDER_TAB_MARKET && tab_id!=PS_ORDER_TAB_LIMIT && tab_id!=PS_ORDER_TAB_STOP" in tab
+    assert platform.count("PS_BM_CLICK") == 2
+    find = re.search(r"ulong PS_PlatformFindOrderDialog.*?\n  \}", platform, re.S).group(0)
+    assert "process!=own_process" in find and 'StringFind(shown,symbol+",")==0' in find
+    fill = main[main.index("void PS_DoFill()"):main.index("bool PS_FillTextMatches(const string shown,const string wanted)\n  {")]
+    assert "OrderSend" not in fill and "PS_TradeSendSnapshot" not in fill
+    assert "PS_FillFail(" in fill and "PS_FillTextMatches(PS_PlatformReadEdit(page,PS_ORDER_EDIT_VOLUME),g_fill_volume)" in fill
+    assert main.count("PS_DoFill();") == 1
+
+
+def test_take_profit_field_shows_pips_and_broker_calculated_profit():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    assert ui.count("PS_PremiumFieldSuffix(ui,PS_CTRL_TAKE_FIELD,") == 2
+    money = re.search(r"string PS_UITakeMoneyText.*?\n  \}", ui, re.S).group(0)
+    assert "OrderCalcProfit(type,market.symbol,calc.volume,calc.effective_entry,model.take_profit,profit)" in money
+    assert "profit<=0.0" in money and "market.account_currency" in money
+    suffix = re.search(r"void PS_PremiumFieldSuffix.*?\n  \}", ui, re.S).group(0)
+    assert "accent_w<=room" in suffix and "TextWidth(suffix)>room" in suffix
+
+
+def test_panel_drag_frame_makes_no_blocking_chart_query():
+    ui = (SRC / "PS_UI.mqh").read_text(encoding="utf-8")
+    main = MAIN.read_text(encoding="utf-8")
+    platform = (SRC / "PS_Platform.mqh").read_text(encoding="utf-8")
+    set_position = re.search(r"void PS_UISetPanelPosition.*?\n  \}", ui, re.S).group(0)
+    code = strip_comments_and_strings(set_position)
+    for blocking in ["PS_UILayout", "PS_UIReadChartSize", "PS_UIClampPanel", "ChartGetInteger", "ChartGetDouble"]:
+        assert blocking not in code
+    assert "ui.chart_w-ui.panel_w" in set_position and "ui.chart_h-ui.panel_h" in set_position
+    pointer = re.search(r"bool PS_PlatformPointerPosition.*?\n  \}", platform, re.S).group(0)
+    assert "static long cached_handle=0;" in pointer and pointer.count("ChartGetInteger(") == 1
+    track = re.search(r"void PS_TrackPriceScale.*?\n  \}", main, re.S).group(0)
+    assert track.index("if(g_pointer.capture!=PS_CAPTURE_NONE) return;") < track.index("ChartGetDouble(")
+
+
+def test_dragged_panel_also_moves_from_mouse_events_with_spacing():
+    main = MAIN.read_text(encoding="utf-8")
+    frame = re.search(r"void PS_PanelDragFrame.*?\n  \}", main, re.S).group(0)
+    assert "g_pointer.capture!=PS_CAPTURE_PANEL || !g_pointer.drag_started" in frame
+    assert "now_us-g_panel_drag_frame_us<4000" in frame and "PS_FlushCapturedMove();" in frame
+    mouse_event = re.search(r"void PS_HandleMouseEvent.*?\n  \}", main, re.S).group(0)
+    assert mouse_event.index("PS_QueueCapturedMove(x,y);") < mouse_event.index("PS_PanelDragFrame();")

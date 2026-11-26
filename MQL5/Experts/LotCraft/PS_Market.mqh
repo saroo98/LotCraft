@@ -152,6 +152,58 @@ void PS_MarketCalculateDirectionalExposure(PSMarketSnapshot &market)
    market.current_symbol_positions=symbol_positions;
   }
 
+bool PS_MarketTextHas(const string text,const string part)
+  {
+   return(StringFind(text,part)>=0);
+  }
+
+double PS_MarketPipSize(const PSMarketSnapshot &market)
+  {
+   // A pip is only standardized for forex. Other classes use the common
+   // trading convention, decided by instrument class, never by digits alone:
+   //   forex         0.0001, or 0.01 when quoted with 2 or 3 digits (JPY)
+   //   gold, platinum, palladium  0.10
+   //   silver        0.01
+   //   indices, crypto            1.00 (one index point, one dollar)
+   //   shares        0.01 (one cent)
+   if(!PS_IsPositiveFinite(market.point)) return(0.0);
+   string name=market.symbol;
+   StringToUpper(name);
+   string path=SymbolInfoString(market.symbol,SYMBOL_PATH);
+   StringToLower(path);
+   long sector=SymbolInfoInteger(market.symbol,SYMBOL_SECTOR);
+   double fractional=((market.digits==3 || market.digits==5) ? market.point*10.0 : market.point);
+
+   if(StringFind(name,"XAG")==0) return(0.01);
+   if(StringFind(name,"XAU")==0 || StringFind(name,"XPT")==0 || StringFind(name,"XPD")==0) return(0.10);
+
+   bool crypto=(sector==SECTOR_CURRENCY_CRYPTO || PS_MarketTextHas(path,"crypto") ||
+                StringFind(name,"BTC")==0 || StringFind(name,"ETH")==0);
+   if(crypto) return(MathMax(1.0,market.point));
+
+   bool forex=(market.calc_mode==SYMBOL_CALC_MODE_FOREX ||
+               market.calc_mode==SYMBOL_CALC_MODE_FOREX_NO_LEVERAGE ||
+               sector==SECTOR_CURRENCY || PS_MarketTextHas(path,"forex") || PS_MarketTextHas(path,"fx"));
+   if(forex) return(fractional);
+
+   // Brokers often leave sector and path empty for index CFDs, so the usual
+   // index tickers are recognized by name as well.
+   string index_names[]={"US30","US500","USTEC","US100","US2000","NAS100","NDX","SPX","SP500","DJ30","WS30",
+                         "DE40","DE30","GER40","GER30","DAX","UK100","FTSE","FRA40","F40","EU50","STOXX",
+                         "ESP35","IT40","JP225","JPN225","NIK","HK50","AUS200","CHINA50","CN50"};
+   bool index=(sector==SECTOR_INDEXES || market.calc_mode==SYMBOL_CALC_MODE_CFDINDEX ||
+               PS_MarketTextHas(path,"indic") || PS_MarketTextHas(path,"index"));
+   for(int i=0;i<ArraySize(index_names) && !index;i++)
+      index=PS_MarketTextHas(name,index_names[i]);
+   if(index) return(MathMax(1.0,market.point));
+
+   bool share=(market.calc_mode==SYMBOL_CALC_MODE_EXCH_STOCKS || PS_MarketTextHas(path,"stock") ||
+               PS_MarketTextHas(path,"share") || PS_MarketTextHas(path,"equit") ||
+               (sector!=SECTOR_UNDEFINED && sector!=SECTOR_COMMODITIES));
+   if(share) return(MathMax(0.01,market.point));
+   return(fractional);
+  }
+
 bool PS_MarketAcquire(PSMarketSnapshot &market)
   {
    ulong started=GetMicrosecondCount();
@@ -196,6 +248,7 @@ bool PS_MarketAcquire(PSMarketSnapshot &market)
    market.expiration_mode=SymbolInfoInteger(market.symbol,SYMBOL_EXPIRATION_MODE);
    market.order_mode=SymbolInfoInteger(market.symbol,SYMBOL_ORDER_MODE);
    market.calc_mode=SymbolInfoInteger(market.symbol,SYMBOL_TRADE_CALC_MODE);
+   market.pip_size=PS_MarketPipSize(market);
 
    ResetLastError();
    market.tick_valid=SymbolInfoTick(market.symbol,market.tick);

@@ -162,7 +162,7 @@ struct PSEditorState {
   PSModel before;
 } g_editor;
 bool g_initialized=true,g_symbol_transition_pending=false,g_ps_panel_render_ready=true;
-bool g_shift_down=false,g_ctrl_down=false,g_panel_dirty=false;
+bool g_shift_down=false,g_ctrl_down=false,g_panel_dirty=false,g_action_from_keyboard=false;
 bool g_shift_state_known=false,g_ctrl_state_known=false;
 uint g_shift_pressed_keys=0,g_ctrl_pressed_keys=0;
 uint g_shortcut_keydowns=0;
